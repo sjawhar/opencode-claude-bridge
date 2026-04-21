@@ -95,6 +95,8 @@ The net effect:
 - Plain skills: visible to model, in user autocomplete.
 - Skills with `disable-model-invocation: true`: hidden from model, in user autocomplete (Claude semantics).
 
+**Note on path rewriting:** The bridge does NOT rewrite `.claude/` paths in skill bodies (unlike agents and commands). Skills are discoverable through two paths — the bridge-registered command AND OpenCode's native skill tool — and OpenCode only controls the latter. Applying path rewrites asymmetrically would make the two paths diverge. Skill authors should use tool-neutral paths.
+
 
 Skills are **not** handled by this plugin beyond permission management (see above). OpenCode natively discovers skills from:
 

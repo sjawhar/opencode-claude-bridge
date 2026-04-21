@@ -3,7 +3,6 @@ import { basename, dirname } from "node:path";
 import { parseFrontmatter } from "./frontmatter";
 import type { Logger } from "./logger";
 import { mapClaudeModel } from "./model-mapper";
-import { rewriteClaudePaths } from "./rewrite-paths";
 
 interface SkillFrontmatter {
   name?: string;
@@ -50,7 +49,7 @@ export async function translateSkillFile(
 
   const template =
     "<command-instruction>\n" +
-    rewriteClaudePaths(body.trim()) +
+    body.trim() +
     "\n</command-instruction>\n\n" +
     "<user-request>\n$ARGUMENTS\n</user-request>";
 

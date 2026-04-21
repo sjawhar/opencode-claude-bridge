@@ -50,13 +50,13 @@ describe("translateSkillFile", () => {
     );
   });
 
-  test("applies rewriteClaudePaths to body", async () => {
+  test("does NOT apply rewriteClaudePaths to body", async () => {
     const fixture = path.join(
       import.meta.dir,
       "fixtures/sjawhar/skills/public-thing/SKILL.md",
     );
     const result = await translateSkillFile(fixture, logger);
-    // The body should be wrapped in the template
+    // The body should be wrapped in the template without path rewriting
     expect(result?.config.template).toContain("Body for public-thing.");
   });
 
