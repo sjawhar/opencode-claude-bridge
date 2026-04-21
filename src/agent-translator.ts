@@ -4,6 +4,7 @@ import { mapClaudeColor } from "./color-mapper";
 import { parseFrontmatter } from "./frontmatter";
 import type { Logger } from "./logger";
 import { mapClaudeModel } from "./model-mapper";
+import { rewriteClaudePaths } from "./rewrite-paths";
 import { parseToolsList } from "./tools-parser";
 
 interface AgentFrontmatter {
@@ -48,15 +49,17 @@ export async function translateAgentFile(
 
   const config: TranslatedAgent["config"] = {
     mode: data.mode || "subagent",
-    prompt: body.trim(),
+    prompt: rewriteClaudePaths(body.trim()),
   };
 
   if (data.description) config.description = data.description;
 
-  const model = mapClaudeModel(data.model);
-  if (model) config.model = model;
+  if (config.mode === "primary") {
+    const model = mapClaudeModel(data.model);
+    if (model) config.model = model;
+  }
 
-  const tools = parseToolsList(data.tools);
+  const tools = parseToolsList(data.tools, logger);
   if (tools) config.tools = tools;
 
   const color = mapClaudeColor(data.color);

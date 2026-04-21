@@ -1,5 +1,25 @@
+import type { Logger } from "./logger";
+
+const CANONICAL_TOOLS = new Set([
+  "read",
+  "write",
+  "edit",
+  "bash",
+  "grep",
+  "glob",
+  "list",
+  "webfetch",
+  "skill",
+  "patch",
+  "task",
+  "question",
+  "todowrite",
+  "todoread",
+]);
+
 export function parseToolsList(
   value: unknown,
+  logger?: Logger,
 ): Record<string, boolean> | undefined {
   if (!value) return undefined;
 
@@ -21,7 +41,14 @@ export function parseToolsList(
 
   const result: Record<string, boolean> = {};
   for (const tool of items) {
-    result[tool.toLowerCase()] = true;
+    const normalized = tool.toLowerCase();
+    if (CANONICAL_TOOLS.has(normalized)) {
+      result[normalized] = true;
+    } else if (logger) {
+      logger.debug(`Dropped unknown tool "${tool}"`).catch(() => {
+        // ignore logging errors
+      });
+    }
   }
-  return result;
+  return Object.keys(result).length > 0 ? result : undefined;
 }

@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { parseFrontmatter } from "./frontmatter";
 import type { Logger } from "./logger";
 import { mapClaudeModel } from "./model-mapper";
+import { rewriteClaudePaths } from "./rewrite-paths";
 
 interface CommandFrontmatter {
   description?: string;
@@ -46,7 +47,7 @@ export async function translateCommandFile(
 
   const template =
     "<command-instruction>\n" +
-    body.trim() +
+    rewriteClaudePaths(body.trim()) +
     "\n</command-instruction>\n\n" +
     "<user-request>\n$ARGUMENTS\n</user-request>";
 
