@@ -16,9 +16,17 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
       config: async (config: Record<string, unknown>) => {
         const agentMap = (config.agent ??= {}) as Record<string, unknown>;
         const commandMap = (config.command ??= {}) as Record<string, unknown>;
+        const skillPerms = (config.permission ??= {}) as Record<
+          string,
+          unknown
+        >;
+        const skillMap = (skillPerms.skill ??= {}) as Record<string, unknown>;
 
         for (const source of bridgeConfig.sources) {
-          const { agents, commands } = await loadSource(source, logger);
+          const { agents, commands, deniedSkills } = await loadSource(
+            source,
+            logger,
+          );
 
           // Register agents with collision-fallback logic
           for (const [baseName, cfg] of Object.entries(agents)) {
@@ -78,6 +86,16 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
                 `collision: command "${baseName}" already taken and no namespace to fall back to; overwriting`,
               );
             }
+          }
+
+          // Apply skill denials
+          for (const name of deniedSkills) {
+            if (skillMap[name] && skillMap[name] !== "deny") {
+              await logger.warn(
+                `Skill "${name}" permission overridden to "deny" (was "${skillMap[name]}")`,
+              );
+            }
+            skillMap[name] = "deny";
           }
         }
       },

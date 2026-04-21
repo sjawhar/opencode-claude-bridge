@@ -28,7 +28,7 @@ export const MyBridge = createClaudeBridge({
 });
 ```
 
-Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills in `<dir>/skills/` are ignored (see below).
+Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills in `<dir>/skills/` are scanned for `disable-model-invocation: true` (see below).
 
 ### Source options
 
@@ -37,6 +37,7 @@ Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills
 | `dir` | `string` | — (required) | Path to a directory with Claude-format `agents/` and/or `commands/` subdirs |
 | `agents` | `string \| false` | `"agents"` | Subdir to scan for agent `.md` files; `false` to skip |
 | `commands` | `string \| false` | `"commands"` | Subdir to scan for command `.md` files; `false` to skip |
+| `skills` | `string \| false` | `"skills"` | Subdir to scan for skill `.md` files with `disable-model-invocation: true`; `false` to skip |
 | `namespace` | `string` | — | Prefix added to every registered agent/command name, hyphen-separated |
 
 ## Agent translation (Claude `.md` → OpenCode `config.agent`)
@@ -64,9 +65,28 @@ Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills
 | `handoffs` | `handoffs` | pass through |
 | `argument-hint` | — | dropped (OpenCode `config.command` schema rejects it) |
 
-## Skills
+## Skill permissions (disable-model-invocation)
 
-Skills are **not** handled by this plugin. OpenCode natively discovers skills from:
+Claude's `disable-model-invocation: true` frontmatter field hides a skill from the model's auto-discovery but keeps it user-invocable via slash command. OpenCode doesn't natively honor this field — skills with it are fully auto-invocable by the model.
+
+This bridge bridges the gap: for each SKILL.md with `disable-model-invocation: true` in a source's `skills/` subdir, it adds `config.permission.skill[<name>] = "deny"`. Result: the model can't see or invoke the skill, but the user can still run it via `/<name>`.
+
+Source option to skip skill scanning:
+
+```ts
+createBridge({
+  sources: [
+    { dir: "/path", skills: false },  // don't scan skills at all
+    { dir: "/other", skills: "my-skills" },  // custom subdir name
+  ],
+});
+```
+
+If a skill already has a different permission set in `config.permission.skill[<name>]`, the bridge will overwrite it with `"deny"` and log a warning.
+
+## Skills (native OpenCode discovery)
+
+Skills are **not** handled by this plugin beyond permission management (see above). OpenCode natively discovers skills from:
 
 - `.opencode/skills/<name>/SKILL.md` (project-local OpenCode)
 - `~/.config/opencode/skills/<name>/SKILL.md` (global OpenCode)

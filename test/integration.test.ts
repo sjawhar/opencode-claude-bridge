@@ -132,4 +132,91 @@ describe("createClaudeBridge", () => {
       (config.agent as Record<string, unknown>)["sjawhar-bug-finder"],
     ).toBeUndefined();
   });
+
+  test("writes deny entries to config.permission.skill", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {};
+    await configHook(config);
+
+    const skillPerms = config.permission as Record<string, unknown>;
+    const skillMap = skillPerms.skill as Record<string, unknown>;
+    expect(skillMap["hidden-thing"]).toBe("deny");
+    expect(skillMap["derived-name"]).toBe("deny");
+    expect(skillMap["public-thing"]).toBeUndefined();
+  });
+
+  test("warns when overriding existing non-deny permission", async () => {
+    const logFn = mock(async () => ({}));
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: logFn } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {
+      permission: {
+        skill: { "hidden-thing": "allow" },
+      },
+    };
+    await configHook(config);
+
+    const skillPerms = config.permission as Record<string, unknown>;
+    const skillMap = skillPerms.skill as Record<string, unknown>;
+    expect(skillMap["hidden-thing"]).toBe("deny");
+    const warnCalls = logFn.mock.calls.filter(
+      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
+    );
+    expect(warnCalls.length).toBeGreaterThan(0);
+  });
+
+  test("preserves existing unrelated skill permissions", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {
+      permission: {
+        skill: { "other-skill": "ask" },
+      },
+    };
+    await configHook(config);
+
+    const skillPerms = config.permission as Record<string, unknown>;
+    const skillMap = skillPerms.skill as Record<string, unknown>;
+    expect(skillMap["other-skill"]).toBe("ask");
+  });
 });
