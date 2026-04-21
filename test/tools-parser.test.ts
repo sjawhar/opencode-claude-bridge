@@ -3,19 +3,32 @@ import { parseToolsList } from "../src/tools-parser";
 
 describe("parseToolsList", () => {
   test("parses comma-separated string", () => {
-    expect(parseToolsList("Read, Edit, Write")).toEqual({ read: true, edit: true, write: true });
+    expect(parseToolsList("Read, Edit, Write")).toEqual({
+      read: true,
+      edit: true,
+      write: true,
+    });
   });
 
   test("parses array of strings", () => {
-    expect(parseToolsList(["Read", "Edit"])).toEqual({ read: true, edit: true });
+    expect(parseToolsList(["Read", "Edit"])).toEqual({
+      read: true,
+      edit: true,
+    });
   });
 
   test("lowercases tool names", () => {
-    expect(parseToolsList("WebFetch, TodoWrite")).toEqual({ webfetch: true, todowrite: true });
+    expect(parseToolsList("WebFetch, TodoWrite")).toEqual({
+      webfetch: true,
+      todowrite: true,
+    });
   });
 
   test("trims whitespace", () => {
-    expect(parseToolsList("  Read  ,   Edit  ")).toEqual({ read: true, edit: true });
+    expect(parseToolsList("  Read  ,   Edit  ")).toEqual({
+      read: true,
+      edit: true,
+    });
   });
 
   test("returns undefined for falsy", () => {
@@ -25,6 +38,9 @@ describe("parseToolsList", () => {
   });
 
   test("ignores non-string array entries", () => {
-    expect(parseToolsList(["Read", 42, null, "Edit"] as unknown[])).toEqual({ read: true, edit: true });
+    expect(parseToolsList(["Read", 42, null, "Edit"] as unknown[])).toEqual({
+      read: true,
+      edit: true,
+    });
   });
 });

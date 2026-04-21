@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { mapClaudeColor } from "./color-mapper";
 import { parseFrontmatter } from "./frontmatter";
+import type { Logger } from "./logger";
 import { mapClaudeModel } from "./model-mapper";
 import { parseToolsList } from "./tools-parser";
-import { mapClaudeColor } from "./color-mapper";
-import type { Logger } from "./logger";
 
 interface AgentFrontmatter {
   name?: string;
@@ -42,7 +42,9 @@ export async function translateAgentFile(
   try {
     content = readFileSync(filePath, "utf-8");
   } catch (err) {
-    await logger.warn(`Failed to read agent file: ${filePath}`, { error: String(err) });
+    await logger.warn(`Failed to read agent file: ${filePath}`, {
+      error: String(err),
+    });
     return null;
   }
 
@@ -66,7 +68,9 @@ export async function translateAgentFile(
   const color = mapClaudeColor(data.color);
   if (color) config.color = color;
   else if (data.color) {
-    await logger.debug(`Dropped unrecognized color "${data.color}" from agent ${name}`);
+    await logger.debug(
+      `Dropped unrecognized color "${data.color}" from agent ${name}`,
+    );
   }
 
   return { name, config };

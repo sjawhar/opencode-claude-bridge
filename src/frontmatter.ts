@@ -13,10 +13,15 @@ function parseInlineArray(value: string): string[] {
   // Accept "[a, b, c]" or "[]"
   const inner = value.slice(1, -1).trim();
   if (!inner) return [];
-  return inner.split(",").map((v) => stripQuotes(v.trim())).filter(Boolean);
+  return inner
+    .split(",")
+    .map((v) => stripQuotes(v.trim()))
+    .filter(Boolean);
 }
 
-export function parseFrontmatter<T = Record<string, unknown>>(content: string): FrontmatterResult<T> {
+export function parseFrontmatter<T = Record<string, unknown>>(
+  content: string,
+): FrontmatterResult<T> {
   const match = content.match(FRONTMATTER_RE);
   if (!match) return { data: {} as T, body: content };
 
@@ -35,8 +40,13 @@ export function parseFrontmatter<T = Record<string, unknown>>(content: string): 
     if (rawValue === "|" || rawValue === ">") {
       // Block scalar — gather indented following lines
       const blockLines: string[] = [];
-      const baseIndent = lines[i + 1] ? lines[i + 1].match(/^\s*/)?.[0].length ?? 0 : 0;
-      while (i + 1 < lines.length && (lines[i + 1].startsWith(" ".repeat(baseIndent)) || lines[i + 1] === "")) {
+      const baseIndent = lines[i + 1]
+        ? (lines[i + 1].match(/^\s*/)?.[0].length ?? 0)
+        : 0;
+      while (
+        i + 1 < lines.length &&
+        (lines[i + 1].startsWith(" ".repeat(baseIndent)) || lines[i + 1] === "")
+      ) {
         blockLines.push(lines[i + 1].slice(baseIndent));
         i++;
       }

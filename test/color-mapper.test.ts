@@ -8,7 +8,15 @@ describe("mapClaudeColor", () => {
   });
 
   test("passes OpenCode theme colors through", () => {
-    for (const c of ["primary", "secondary", "accent", "success", "warning", "error", "info"]) {
+    for (const c of [
+      "primary",
+      "secondary",
+      "accent",
+      "success",
+      "warning",
+      "error",
+      "info",
+    ]) {
       expect(mapClaudeColor(c)).toBe(c);
     }
   });

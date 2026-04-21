@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import path from "path";
-import { loadSource } from "../src/source-loader";
+import path from "node:path";
 import { createLogger } from "../src/logger";
+import { loadSource } from "../src/source-loader";
 
 const logger = createLogger(undefined);
 const sjawhar = path.join(import.meta.dir, "fixtures/sjawhar");
@@ -9,7 +9,10 @@ const empty = path.join(import.meta.dir, "fixtures/empty");
 
 describe("loadSource", () => {
   test("loads agents and commands from a populated source", async () => {
-    const result = await loadSource({ dir: sjawhar, namespace: "sjawhar" }, logger);
+    const result = await loadSource(
+      { dir: sjawhar, namespace: "sjawhar" },
+      logger,
+    );
     expect(Object.keys(result.agents)).toContain("sjawhar-bug-finder");
     expect(Object.keys(result.commands)).toContain("sjawhar-no-excuses");
   });
@@ -34,7 +37,10 @@ describe("loadSource", () => {
 
   test("supports custom agents subdir name", async () => {
     // Point at a dir where agents subdir does not exist
-    const result = await loadSource({ dir: sjawhar, agents: "subagents" }, logger);
+    const result = await loadSource(
+      { dir: sjawhar, agents: "subagents" },
+      logger,
+    );
     expect(result.agents).toEqual({});
   });
 });

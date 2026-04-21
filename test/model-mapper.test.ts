@@ -15,7 +15,9 @@ describe("mapClaudeModel", () => {
   });
 
   test("passes through provider/model format unchanged", () => {
-    expect(mapClaudeModel("anthropic/claude-opus-4-7")).toBe("anthropic/claude-opus-4-7");
+    expect(mapClaudeModel("anthropic/claude-opus-4-7")).toBe(
+      "anthropic/claude-opus-4-7",
+    );
     expect(mapClaudeModel("openai/gpt-5")).toBe("openai/gpt-5");
   });
 

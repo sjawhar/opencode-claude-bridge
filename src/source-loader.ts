@@ -23,7 +23,10 @@ function listMarkdown(dir: string): string[] {
     .map((e) => join(dir, e.name));
 }
 
-export async function loadSource(source: ClaudeBridgeSource, logger: Logger): Promise<LoadedSource> {
+export async function loadSource(
+  source: ClaudeBridgeSource,
+  logger: Logger,
+): Promise<LoadedSource> {
   const agents: Record<string, unknown> = {};
   const commands: Record<string, unknown> = {};
 
@@ -31,24 +34,37 @@ export async function loadSource(source: ClaudeBridgeSource, logger: Logger): Pr
   if (agentsSubdir !== false) {
     const dir = join(source.dir, agentsSubdir);
     for (const filePath of listMarkdown(dir)) {
-      const translated = await translateAgentFile(filePath, { namespace: source.namespace }, logger);
+      const translated = await translateAgentFile(
+        filePath,
+        { namespace: source.namespace },
+        logger,
+      );
       if (translated) {
         if (agents[translated.name]) {
-          await logger.warn(`Duplicate agent name within source ${source.dir}: ${translated.name}`);
+          await logger.warn(
+            `Duplicate agent name within source ${source.dir}: ${translated.name}`,
+          );
         }
         agents[translated.name] = translated.config;
       }
     }
   }
 
-  const commandsSubdir = source.commands === undefined ? "commands" : source.commands;
+  const commandsSubdir =
+    source.commands === undefined ? "commands" : source.commands;
   if (commandsSubdir !== false) {
     const dir = join(source.dir, commandsSubdir);
     for (const filePath of listMarkdown(dir)) {
-      const translated = await translateCommandFile(filePath, { namespace: source.namespace }, logger);
+      const translated = await translateCommandFile(
+        filePath,
+        { namespace: source.namespace },
+        logger,
+      );
       if (translated) {
         if (commands[translated.name]) {
-          await logger.warn(`Duplicate command name within source ${source.dir}: ${translated.name}`);
+          await logger.warn(
+            `Duplicate command name within source ${source.dir}: ${translated.name}`,
+          );
         }
         commands[translated.name] = translated.config;
       }

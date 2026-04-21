@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { parseFrontmatter } from "./frontmatter";
-import { mapClaudeModel } from "./model-mapper";
 import type { Logger } from "./logger";
+import { mapClaudeModel } from "./model-mapper";
 
 interface CommandFrontmatter {
   description?: string;
@@ -40,7 +40,9 @@ export async function translateCommandFile(
   try {
     content = readFileSync(filePath, "utf-8");
   } catch (err) {
-    await logger.warn(`Failed to read command file: ${filePath}`, { error: String(err) });
+    await logger.warn(`Failed to read command file: ${filePath}`, {
+      error: String(err),
+    });
     return null;
   }
 

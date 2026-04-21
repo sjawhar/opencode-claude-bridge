@@ -1,4 +1,4 @@
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { createLogger } from "../src/logger";
 
 describe("createLogger", () => {
@@ -8,14 +8,21 @@ describe("createLogger", () => {
     const logger = createLogger(client as never);
     await logger.warn("hello", { foo: 1 });
     expect(logFn).toHaveBeenCalledWith({
-      body: { service: "opencode-claude-bridge", level: "warn", message: "hello", extra: { foo: 1 } },
+      body: {
+        service: "opencode-claude-bridge",
+        level: "warn",
+        message: "hello",
+        extra: { foo: 1 },
+      },
     });
   });
 
   test("falls back to console.warn when no client", async () => {
     const origWarn = console.warn;
     const calls: unknown[][] = [];
-    console.warn = (...args: unknown[]) => { calls.push(args); };
+    console.warn = (...args: unknown[]) => {
+      calls.push(args);
+    };
     try {
       const logger = createLogger(undefined);
       await logger.warn("hello");

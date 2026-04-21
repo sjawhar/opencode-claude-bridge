@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { loadSource, type ClaudeBridgeSource } from "./source-loader";
+import type { OpencodeClient } from "@opencode-ai/sdk";
 import { createLogger } from "./logger";
+import { type ClaudeBridgeSource, loadSource } from "./source-loader";
 
 export type { ClaudeBridgeSource } from "./source-loader";
 
@@ -10,7 +11,7 @@ export interface ClaudeBridgeConfig {
 
 export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
   return async ({ client }) => {
-    const logger = createLogger(client as any);
+    const logger = createLogger(client as OpencodeClient);
     return {
       config: async (config: Record<string, unknown>) => {
         const agentMap = (config.agent ??= {}) as Record<string, unknown>;
@@ -21,13 +22,17 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
 
           for (const [name, cfg] of Object.entries(agents)) {
             if (agentMap[name]) {
-              await logger.warn(`Agent name "${name}" overwritten by source ${source.dir}`);
+              await logger.warn(
+                `Agent name "${name}" overwritten by source ${source.dir}`,
+              );
             }
             agentMap[name] = cfg;
           }
           for (const [name, cfg] of Object.entries(commands)) {
             if (commandMap[name]) {
-              await logger.warn(`Command name "${name}" overwritten by source ${source.dir}`);
+              await logger.warn(
+                `Command name "${name}" overwritten by source ${source.dir}`,
+              );
             }
             commandMap[name] = cfg;
           }
