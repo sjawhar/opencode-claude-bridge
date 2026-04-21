@@ -2,7 +2,7 @@ type LogLevel = "debug" | "info" | "warn" | "error";
 
 interface LogClient {
   app: {
-    log: (opts: { body: { service: string; level: LogLevel; message: string; extra?: unknown } }) => Promise<unknown>;
+    log: (opts: unknown) => Promise<unknown>;
   };
 }
 
