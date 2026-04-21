@@ -23,10 +23,8 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
         const skillMap = (skillPerms.skill ??= {}) as Record<string, unknown>;
 
         for (const source of bridgeConfig.sources) {
-          const { agents, commands, deniedSkills } = await loadSource(
-            source,
-            logger,
-          );
+          const { agents, commands, skillCommands, deniedSkills } =
+            await loadSource(source, logger);
 
           // Register agents with collision-fallback logic
           for (const [baseName, cfg] of Object.entries(agents)) {
@@ -84,6 +82,36 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
               commandMap[baseName] = cfg;
               await logger.warn(
                 `collision: command "${baseName}" already taken and no namespace to fall back to; overwriting`,
+              );
+            }
+          }
+
+          // Register skill-commands with collision-fallback logic
+          for (const [baseName, cfg] of Object.entries(skillCommands)) {
+            if (!commandMap[baseName]) {
+              // No collision: register under baseName
+              commandMap[baseName] = cfg;
+            } else if (source.namespace) {
+              // Collision with namespace: try prefixed name
+              const prefixedName = `${source.namespace}/${baseName}`;
+              if (!commandMap[prefixedName]) {
+                // Prefixed name is free: register there
+                commandMap[prefixedName] = cfg;
+                await logger.info(
+                  `collision: skill-command "${baseName}" already taken; registered as "${prefixedName}"`,
+                );
+              } else {
+                // Both baseName and prefixed name taken: overwrite prefixed
+                commandMap[prefixedName] = cfg;
+                await logger.warn(
+                  `collision: both "${baseName}" and "${prefixedName}" already taken; overwriting "${prefixedName}"`,
+                );
+              }
+            } else {
+              // Collision without namespace: overwrite baseName
+              commandMap[baseName] = cfg;
+              await logger.warn(
+                `collision: skill-command "${baseName}" already taken and no namespace to fall back to; overwriting`,
               );
             }
           }

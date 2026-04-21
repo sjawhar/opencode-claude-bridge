@@ -219,4 +219,117 @@ describe("createClaudeBridge", () => {
     const skillMap = skillPerms.skill as Record<string, unknown>;
     expect(skillMap["other-skill"]).toBe("ask");
   });
+  test("registers skills as commands in config.command", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {};
+    await configHook(config);
+
+    const commandMap = config.command as Record<string, unknown>;
+    expect(commandMap["public-thing"]).toBeDefined();
+    expect(commandMap["hidden-thing"]).toBeDefined();
+    expect(commandMap["derived-name"]).toBeDefined();
+    // Verify they have the command template structure
+    expect(
+      (commandMap["public-thing"] as Record<string, unknown>).template,
+    ).toContain("<command-instruction>");
+  });
+
+  test("namespaces skill-command on collision with pre-existing command", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {
+      command: { "public-thing": { existing: true } },
+    };
+    await configHook(config);
+
+    const commandMap = config.command as Record<string, unknown>;
+    // Pre-existing entry should be untouched
+    expect(commandMap["public-thing"]).toEqual({ existing: true });
+    // Skill should be registered under prefixed name
+    expect(commandMap["sjawhar/public-thing"]).toBeDefined();
+  });
+
+  test("registers skills as commands in config.command", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {};
+    await configHook(config);
+
+    const commandMap = config.command as Record<string, unknown>;
+    expect(commandMap["public-thing"]).toBeDefined();
+    expect(commandMap["hidden-thing"]).toBeDefined();
+    expect(commandMap["derived-name"]).toBeDefined();
+    // Verify they have the command template structure
+    expect(
+      (commandMap["public-thing"] as Record<string, unknown>).template,
+    ).toContain("<command-instruction>");
+  });
+
+  test("namespaces skill-command on collision with pre-existing command", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {
+      command: { "public-thing": { existing: true } },
+    };
+    await configHook(config);
+
+    const commandMap = config.command as Record<string, unknown>;
+    // Pre-existing entry should be untouched
+    expect(commandMap["public-thing"]).toEqual({ existing: true });
+    // Skill should be registered under prefixed name
+    expect(commandMap["sjawhar/public-thing"]).toBeDefined();
+  });
 });

@@ -1,10 +1,10 @@
 import { existsSync, readdirSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { translateAgentFile } from "./agent-translator";
 import { translateCommandFile } from "./command-translator";
-import { parseFrontmatter } from "./frontmatter";
+
 import type { Logger } from "./logger";
+import { translateSkillFile } from "./skill-translator";
 
 export interface ClaudeBridgeSource {
   dir: string;
@@ -17,6 +17,7 @@ export interface ClaudeBridgeSource {
 export interface LoadedSource {
   agents: Record<string, unknown>;
   commands: Record<string, unknown>;
+  skillCommands: Record<string, unknown>;
   deniedSkills: string[];
 }
 
@@ -27,8 +28,12 @@ function listMarkdown(dir: string): string[] {
     .map((e) => join(dir, e.name));
 }
 
-async function scanSkillsForDenial(dir: string): Promise<string[]> {
-  if (!existsSync(dir)) return [];
+async function scanSkillsForDenialAndCommands(
+  dir: string,
+  logger: Logger,
+): Promise<{ skillCommands: Record<string, unknown>; denied: string[] }> {
+  if (!existsSync(dir)) return { skillCommands: {}, denied: [] };
+  const skillCommands: Record<string, unknown> = {};
   const denied: string[] = [];
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -36,20 +41,23 @@ async function scanSkillsForDenial(dir: string): Promise<string[]> {
     const skillPath = join(dir, entry.name, "SKILL.md");
     if (!existsSync(skillPath)) continue;
     try {
-      const content = await readFile(skillPath, "utf-8");
-      const { data } = parseFrontmatter(content);
-      if (
-        data["disable-model-invocation"] === "true" ||
-        data["disable-model-invocation"] === true
-      ) {
-        const skillName = (data.name as string) || entry.name;
-        denied.push(skillName);
+      const translated = await translateSkillFile(skillPath, logger);
+      if (translated) {
+        if (skillCommands[translated.baseName]) {
+          await logger.warn(
+            `Duplicate skill name within source: ${translated.baseName}`,
+          );
+        }
+        skillCommands[translated.baseName] = translated.config;
+        if (translated.disabled) {
+          denied.push(translated.baseName);
+        }
       }
     } catch {
       // Silently skip unparseable files
     }
   }
-  return denied;
+  return { skillCommands, denied };
 }
 
 export async function loadSource(
@@ -93,11 +101,14 @@ export async function loadSource(
   }
 
   const skillsSubdir = source.skills === undefined ? "skills" : source.skills;
+  let skillCommands: Record<string, unknown> = {};
   let deniedSkills: string[] = [];
   if (skillsSubdir !== false) {
     const dir = join(source.dir, skillsSubdir);
-    deniedSkills = await scanSkillsForDenial(dir);
+    const result = await scanSkillsForDenialAndCommands(dir, logger);
+    skillCommands = result.skillCommands;
+    deniedSkills = result.denied;
   }
 
-  return { agents, commands, deniedSkills };
+  return { agents, commands, skillCommands, deniedSkills };
 }

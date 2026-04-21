@@ -85,6 +85,16 @@ createBridge({
 If a skill already has a different permission set in `config.permission.skill[<name>]`, the bridge will overwrite it with `"deny"` and log a warning.
 
 ## Skills (native OpenCode discovery)
+## Skills in slash-command autocomplete
+
+OpenCode's `/` autocomplete is populated from the command registry, not from skills. Skills are slash-invocable at runtime (OpenCode falls back to skill lookup for unknown `/foo`), but they don't appear in autocomplete.
+
+To fix this, the bridge ALSO registers every scanned skill as a command. The skill's body is wrapped in the same `<command-instruction>...$ARGUMENTS` template used for regular commands. This does NOT remove the skill from OpenCode's skill catalog — the model can still auto-discover it unless `disable-model-invocation: true` is set.
+
+The net effect:
+- Plain skills: visible to model, in user autocomplete.
+- Skills with `disable-model-invocation: true`: hidden from model, in user autocomplete (Claude semantics).
+
 
 Skills are **not** handled by this plugin beyond permission management (see above). OpenCode natively discovers skills from:
 

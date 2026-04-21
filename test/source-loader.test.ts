@@ -41,20 +41,25 @@ describe("loadSource", () => {
     expect(result.agents).toEqual({});
   });
 
-  test("scans skills dir for disable-model-invocation: true", async () => {
+  test("scans skills dir for disable-model-invocation: true and returns skillCommands", async () => {
     const result = await loadSource({ dir: sjawhar }, logger);
     expect(result.deniedSkills).toContain("hidden-thing");
     expect(result.deniedSkills).toContain("derived-name");
     expect(result.deniedSkills).not.toContain("public-thing");
+    expect(Object.keys(result.skillCommands)).toContain("public-thing");
+    expect(Object.keys(result.skillCommands)).toContain("hidden-thing");
+    expect(Object.keys(result.skillCommands)).toContain("derived-name");
   });
 
   test("skips skills scan when skills: false", async () => {
     const result = await loadSource({ dir: sjawhar, skills: false }, logger);
     expect(result.deniedSkills).toEqual([]);
+    expect(result.skillCommands).toEqual({});
   });
 
-  test("returns empty deniedSkills when skills subdir doesn't exist", async () => {
+  test("returns empty skillCommands and deniedSkills when skills subdir doesn't exist", async () => {
     const result = await loadSource({ dir: empty }, logger);
     expect(result.deniedSkills).toEqual([]);
+    expect(result.skillCommands).toEqual({});
   });
 });
