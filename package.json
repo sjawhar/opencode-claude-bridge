@@ -1,0 +1,29 @@
+{
+  "name": "@sjawhar/opencode-claude-bridge",
+  "version": "0.1.0",
+  "description": "Bridge Claude Code agents and commands into OpenCode via the plugin config hook",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm && bunx tsc --emitDeclarationOnly --outDir dist",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "lint": "bunx biome check src/ test/"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.1.19"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@types/bun": "latest",
+    "typescript": "^5.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sjawhar/opencode-claude-bridge.git"
+  },
+  "keywords": ["opencode", "claude-code", "plugin", "bridge"],
+  "license": "MIT"
+}
