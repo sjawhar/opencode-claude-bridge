@@ -14,7 +14,7 @@ interface CommandFrontmatter {
 }
 
 export interface TranslatedCommand {
-  name: string;
+  baseName: string;
   config: {
     description?: string;
     template: string;
@@ -25,13 +25,8 @@ export interface TranslatedCommand {
   };
 }
 
-export interface TranslateCommandOptions {
-  namespace?: string;
-}
-
 export async function translateCommandFile(
   filePath: string,
-  opts: TranslateCommandOptions,
   logger: Logger,
 ): Promise<TranslatedCommand | null> {
   if (!existsSync(filePath)) return null;
@@ -48,7 +43,6 @@ export async function translateCommandFile(
 
   const { data, body } = parseFrontmatter<CommandFrontmatter>(content);
   const baseName = basename(filePath).replace(/\.md$/i, "");
-  const name = opts.namespace ? `${opts.namespace}-${baseName}` : baseName;
 
   const template =
     "<command-instruction>\n" +
@@ -64,5 +58,5 @@ export async function translateCommandFile(
   if (typeof data.subtask === "boolean") config.subtask = data.subtask;
   if (data.handoffs) config.handoffs = data.handoffs;
 
-  return { name, config };
+  return { baseName, config };
 }

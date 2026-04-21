@@ -16,7 +16,7 @@ interface AgentFrontmatter {
 }
 
 export interface TranslatedAgent {
-  name: string;
+  baseName: string;
   config: {
     description?: string;
     mode: string;
@@ -27,13 +27,8 @@ export interface TranslatedAgent {
   };
 }
 
-export interface TranslateOptions {
-  namespace?: string;
-}
-
 export async function translateAgentFile(
   filePath: string,
-  opts: TranslateOptions,
   logger: Logger,
 ): Promise<TranslatedAgent | null> {
   if (!existsSync(filePath)) return null;
@@ -50,7 +45,6 @@ export async function translateAgentFile(
 
   const { data, body } = parseFrontmatter<AgentFrontmatter>(content);
   const baseName = data.name || basename(filePath).replace(/\.md$/i, "");
-  const name = opts.namespace ? `${opts.namespace}-${baseName}` : baseName;
 
   const config: TranslatedAgent["config"] = {
     mode: data.mode || "subagent",
@@ -69,9 +63,9 @@ export async function translateAgentFile(
   if (color) config.color = color;
   else if (data.color) {
     await logger.debug(
-      `Dropped unrecognized color "${data.color}" from agent ${name}`,
+      `Dropped unrecognized color "${data.color}" from agent ${baseName}`,
     );
   }
 
-  return { name, config };
+  return { baseName, config };
 }

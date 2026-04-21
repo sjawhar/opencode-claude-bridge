@@ -11,13 +11,9 @@ const fixture = path.join(
 
 describe("translateAgentFile", () => {
   test("translates bug-finder fixture correctly", async () => {
-    const result = await translateAgentFile(
-      fixture,
-      { namespace: "sjawhar" },
-      logger,
-    );
+    const result = await translateAgentFile(fixture, logger);
     expect(result).toEqual({
-      name: "sjawhar-bug-finder",
+      baseName: "bug-finder",
       config: {
         description:
           "Find subtle bugs and edge cases in recently written code.",
@@ -30,18 +26,13 @@ describe("translateAgentFile", () => {
     });
   });
 
-  test("omits namespace prefix when unset", async () => {
-    const result = await translateAgentFile(fixture, {}, logger);
-    expect(result?.name).toBe("bug-finder");
-  });
-
   test("drops invalid color without failing", async () => {
-    const result = await translateAgentFile(fixture, {}, logger);
+    const result = await translateAgentFile(fixture, logger);
     expect(result?.config.color).toBeUndefined();
   });
 
   test("returns null for missing file", async () => {
-    const result = await translateAgentFile("/nonexistent/path.md", {}, logger);
+    const result = await translateAgentFile("/nonexistent/path.md", logger);
     expect(result).toBeNull();
   });
 });

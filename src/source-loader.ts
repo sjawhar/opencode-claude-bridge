@@ -34,18 +34,14 @@ export async function loadSource(
   if (agentsSubdir !== false) {
     const dir = join(source.dir, agentsSubdir);
     for (const filePath of listMarkdown(dir)) {
-      const translated = await translateAgentFile(
-        filePath,
-        { namespace: source.namespace },
-        logger,
-      );
+      const translated = await translateAgentFile(filePath, logger);
       if (translated) {
-        if (agents[translated.name]) {
+        if (agents[translated.baseName]) {
           await logger.warn(
-            `Duplicate agent name within source ${source.dir}: ${translated.name}`,
+            `Duplicate agent name within source ${source.dir}: ${translated.baseName}`,
           );
         }
-        agents[translated.name] = translated.config;
+        agents[translated.baseName] = translated.config;
       }
     }
   }
@@ -55,18 +51,14 @@ export async function loadSource(
   if (commandsSubdir !== false) {
     const dir = join(source.dir, commandsSubdir);
     for (const filePath of listMarkdown(dir)) {
-      const translated = await translateCommandFile(
-        filePath,
-        { namespace: source.namespace },
-        logger,
-      );
+      const translated = await translateCommandFile(filePath, logger);
       if (translated) {
-        if (commands[translated.name]) {
+        if (commands[translated.baseName]) {
           await logger.warn(
-            `Duplicate command name within source ${source.dir}: ${translated.name}`,
+            `Duplicate command name within source ${source.dir}: ${translated.baseName}`,
           );
         }
-        commands[translated.name] = translated.config;
+        commands[translated.baseName] = translated.config;
       }
     }
   }

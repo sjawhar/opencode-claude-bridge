@@ -9,12 +9,9 @@ const empty = path.join(import.meta.dir, "fixtures/empty");
 
 describe("loadSource", () => {
   test("loads agents and commands from a populated source", async () => {
-    const result = await loadSource(
-      { dir: sjawhar, namespace: "sjawhar" },
-      logger,
-    );
-    expect(Object.keys(result.agents)).toContain("sjawhar-bug-finder");
-    expect(Object.keys(result.commands)).toContain("sjawhar-no-excuses");
+    const result = await loadSource({ dir: sjawhar }, logger);
+    expect(Object.keys(result.agents)).toContain("bug-finder");
+    expect(Object.keys(result.commands)).toContain("no-excuses");
   });
 
   test("returns empty records for dir with no agents/ or commands/", async () => {
