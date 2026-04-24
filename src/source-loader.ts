@@ -4,6 +4,7 @@ import { translateAgentFile } from "./agent-translator";
 import { translateCommandFile } from "./command-translator";
 
 import type { Logger } from "./logger";
+import type { TranslatedMcp } from "./mcp-translator";
 import { translateSkillFile } from "./skill-translator";
 
 export interface ClaudeBridgeSource {
@@ -19,6 +20,7 @@ export interface LoadedSource {
   commands: Record<string, unknown>;
   skillCommands: Record<string, unknown>;
   deniedSkills: string[];
+  skillMcps: Record<string, TranslatedMcp>;
 }
 
 function listMarkdown(dir: string): string[] {
@@ -28,13 +30,20 @@ function listMarkdown(dir: string): string[] {
     .map((e) => join(dir, e.name));
 }
 
-async function scanSkillsForDenialAndCommands(
+interface SkillsScanResult {
+  skillCommands: Record<string, unknown>;
+  denied: string[];
+  mcps: Record<string, TranslatedMcp>;
+}
+
+async function scanSkills(
   dir: string,
   logger: Logger,
-): Promise<{ skillCommands: Record<string, unknown>; denied: string[] }> {
-  if (!existsSync(dir)) return { skillCommands: {}, denied: [] };
+): Promise<SkillsScanResult> {
+  if (!existsSync(dir)) return { skillCommands: {}, denied: [], mcps: {} };
   const skillCommands: Record<string, unknown> = {};
   const denied: string[] = [];
+  const mcps: Record<string, TranslatedMcp> = {};
   const entries = readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -52,12 +61,23 @@ async function scanSkillsForDenialAndCommands(
         if (translated.disabled) {
           denied.push(translated.baseName);
         }
+        for (const [mcpName, mcpConfig] of Object.entries(translated.mcps)) {
+          if (mcps[mcpName]) {
+            await logger.warn(
+              `Duplicate MCP server name "${mcpName}" within source (from skill "${translated.baseName}")`,
+            );
+          }
+          mcps[mcpName] = mcpConfig;
+        }
       }
-    } catch {
-      // Silently skip unparseable files
+    } catch (err) {
+      await logger.warn(
+        `Failed to translate skill at ${skillPath}; skipping.`,
+        { error: String(err) },
+      );
     }
   }
-  return { skillCommands, denied };
+  return { skillCommands, denied, mcps };
 }
 
 export async function loadSource(
@@ -103,12 +123,14 @@ export async function loadSource(
   const skillsSubdir = source.skills === undefined ? "skills" : source.skills;
   let skillCommands: Record<string, unknown> = {};
   let deniedSkills: string[] = [];
+  let skillMcps: Record<string, TranslatedMcp> = {};
   if (skillsSubdir !== false) {
     const dir = join(source.dir, skillsSubdir);
-    const result = await scanSkillsForDenialAndCommands(dir, logger);
+    const result = await scanSkills(dir, logger);
     skillCommands = result.skillCommands;
     deniedSkills = result.denied;
+    skillMcps = result.mcps;
   }
 
-  return { agents, commands, skillCommands, deniedSkills };
+  return { agents, commands, skillCommands, deniedSkills, skillMcps };
 }

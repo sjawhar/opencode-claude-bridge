@@ -332,4 +332,157 @@ describe("createClaudeBridge", () => {
     // Skill should be registered under prefixed name
     expect(commandMap["sjawhar/public-thing"]).toBeDefined();
   });
+
+  test("registers skill MCPs into config.mcp with no collision", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {};
+    await configHook(config);
+
+    const mcpMap = config.mcp as Record<string, unknown>;
+    expect(mcpMap.slack).toMatchObject({
+      type: "local",
+      command: ["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"],
+    });
+    expect(mcpMap.playwright).toMatchObject({
+      type: "local",
+      command: ["npx", "-y", "@playwright/mcp@latest"],
+    });
+    expect(mcpMap.upstream).toMatchObject({
+      type: "remote",
+      url: "https://mcp.example.com/mcp",
+    });
+  });
+
+  test("preserves pre-existing config.mcp entries and falls back to namespace-hyphen prefix on collision", async () => {
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: mock(async () => ({})) } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const existingSlack = { type: "local", command: ["external"] };
+    const config: Record<string, unknown> = {
+      mcp: { slack: existingSlack },
+    };
+    await configHook(config);
+
+    const mcpMap = config.mcp as Record<string, unknown>;
+    // Pre-existing entry must be untouched.
+    expect(mcpMap.slack).toEqual(existingSlack);
+    // Colliding skill MCP registered under hyphen-prefixed name.
+    expect(mcpMap["sjawhar-slack"]).toMatchObject({ type: "local" });
+  });
+
+  test("overwrites with warning on collision without namespace", async () => {
+    const logFn = mock(async () => ({}));
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: logFn } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const config: Record<string, unknown> = {
+      mcp: { slack: { type: "local", command: ["external"] } },
+    };
+    await configHook(config);
+
+    const mcpMap = config.mcp as Record<string, unknown>;
+    expect((mcpMap.slack as Record<string, unknown>).command).toEqual([
+      "secrets",
+      "SLACK_MCP_XOXP_TOKEN",
+      "--",
+      "slack-mcp-server",
+    ]);
+    const warnCalls = logFn.mock.calls.filter(
+      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
+    );
+    expect(
+      warnCalls.some((c) =>
+        ((c[0] as { body: { message: string } }).body.message ?? "").includes(
+          "slack",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test("overwrites prefixed MCP with warning when both base and namespaced names are taken", async () => {
+    const logFn = mock(async () => ({}));
+    const plugin = createClaudeBridge({
+      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+    });
+    const hooks = await (
+      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+    )({
+      client: { app: { log: logFn } },
+      directory: process.cwd(),
+      worktree: process.cwd(),
+      project: { path: process.cwd() },
+      $: mock(() => ({})),
+    });
+    const configHook = hooks.config as (
+      c: Record<string, unknown>,
+    ) => Promise<void>;
+    const existingBase = { type: "local", command: ["existing-base"] };
+    const existingPrefixed = {
+      type: "local",
+      command: ["existing-prefixed"],
+    };
+    const config: Record<string, unknown> = {
+      mcp: {
+        slack: existingBase,
+        "sjawhar-slack": existingPrefixed,
+      },
+    };
+    await configHook(config);
+
+    const mcpMap = config.mcp as Record<string, unknown>;
+    // Base name pre-existing entry stays put.
+    expect(mcpMap.slack).toEqual(existingBase);
+    // Prefixed slot was occupied; it gets overwritten by the skill MCP.
+    expect(
+      (mcpMap["sjawhar-slack"] as Record<string, unknown>).command,
+    ).toEqual(["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"]);
+    // A warn-level log should be emitted that mentions both names.
+    const warnCalls = logFn.mock.calls.filter(
+      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
+    );
+    expect(
+      warnCalls.some((c) => {
+        const msg = (c[0] as { body: { message: string } }).body.message ?? "";
+        return msg.includes("slack") && msg.includes("sjawhar-slack");
+      }),
+    ).toBe(true);
+  });
 });
