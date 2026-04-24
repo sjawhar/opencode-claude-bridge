@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { asScalarString } from "./coerce";
 import { mapClaudeColor } from "./color-mapper";
 import { parseFrontmatter } from "./frontmatter";
 import type { Logger } from "./logger";
@@ -8,12 +9,12 @@ import { rewriteClaudePaths } from "./rewrite-paths";
 import { parseToolsList } from "./tools-parser";
 
 interface AgentFrontmatter {
-  name?: string;
-  description?: string;
-  model?: string;
-  mode?: string;
+  name?: unknown;
+  description?: unknown;
+  model?: unknown;
+  mode?: unknown;
   tools?: unknown;
-  color?: string;
+  color?: unknown;
 }
 
 export interface TranslatedAgent {
@@ -45,28 +46,31 @@ export async function translateAgentFile(
   }
 
   const { data, body } = parseFrontmatter<AgentFrontmatter>(content);
-  const baseName = data.name || basename(filePath).replace(/\.md$/i, "");
+  const name = asScalarString(data.name);
+  const baseName = name || basename(filePath).replace(/\.md$/i, "");
 
   const config: TranslatedAgent["config"] = {
-    mode: data.mode || "subagent",
+    mode: asScalarString(data.mode) || "subagent",
     prompt: rewriteClaudePaths(body.trim()),
   };
 
-  if (data.description) config.description = data.description;
+  const description = asScalarString(data.description);
+  if (description) config.description = description;
 
   if (config.mode === "primary") {
-    const model = mapClaudeModel(data.model);
+    const model = mapClaudeModel(asScalarString(data.model));
     if (model) config.model = model;
   }
 
   const tools = parseToolsList(data.tools, logger);
   if (tools) config.tools = tools;
 
-  const color = mapClaudeColor(data.color);
+  const colorRaw = asScalarString(data.color);
+  const color = mapClaudeColor(colorRaw);
   if (color) config.color = color;
-  else if (data.color) {
+  else if (colorRaw) {
     await logger.debug(
-      `Dropped unrecognized color "${data.color}" from agent ${baseName}`,
+      `Dropped unrecognized color "${colorRaw}" from agent ${baseName}`,
     );
   }
 

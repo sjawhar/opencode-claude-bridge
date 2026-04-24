@@ -1,17 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
+import { asScalarString } from "./coerce";
 import { parseFrontmatter } from "./frontmatter";
 import type { Logger } from "./logger";
 import { mapClaudeModel } from "./model-mapper";
 import { rewriteClaudePaths } from "./rewrite-paths";
 
 interface CommandFrontmatter {
-  description?: string;
-  agent?: string;
-  model?: string;
-  subtask?: boolean;
+  description?: unknown;
+  agent?: unknown;
+  model?: unknown;
+  subtask?: unknown;
   handoffs?: unknown;
-  "argument-hint"?: string;
+  "argument-hint"?: unknown;
 }
 
 export interface TranslatedCommand {
@@ -52,9 +53,11 @@ export async function translateCommandFile(
     "<user-request>\n$ARGUMENTS\n</user-request>";
 
   const config: TranslatedCommand["config"] = { template };
-  if (data.description) config.description = data.description;
-  if (data.agent) config.agent = data.agent;
-  const model = mapClaudeModel(data.model);
+  const description = asScalarString(data.description);
+  if (description) config.description = description;
+  const agent = asScalarString(data.agent);
+  if (agent) config.agent = agent;
+  const model = mapClaudeModel(asScalarString(data.model));
   if (model) config.model = model;
   if (typeof data.subtask === "boolean") config.subtask = data.subtask;
   if (data.handoffs) config.handoffs = data.handoffs;

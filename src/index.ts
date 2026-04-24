@@ -1,12 +1,47 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import type { OpencodeClient } from "@opencode-ai/sdk";
-import { createLogger } from "./logger";
+import { createLogger, type Logger } from "./logger";
+import type { TranslatedMcp } from "./mcp-translator";
 import { type ClaudeBridgeSource, loadSource } from "./source-loader";
 
 export type { ClaudeBridgeSource } from "./source-loader";
 
 export interface ClaudeBridgeConfig {
   sources: ClaudeBridgeSource[];
+}
+
+async function registerWithCollision<T>(
+  map: Record<string, unknown>,
+  baseName: string,
+  value: T,
+  kind: string,
+  namespace: string | undefined,
+  separator: string,
+  logger: Logger,
+): Promise<void> {
+  if (!map[baseName]) {
+    map[baseName] = value;
+    return;
+  }
+  if (namespace) {
+    const prefixedName = `${namespace}${separator}${baseName}`;
+    if (!map[prefixedName]) {
+      map[prefixedName] = value;
+      await logger.info(
+        `collision: ${kind} "${baseName}" already taken; registered as "${prefixedName}"`,
+      );
+      return;
+    }
+    map[prefixedName] = value;
+    await logger.warn(
+      `collision: ${kind} both "${baseName}" and "${prefixedName}" already taken; overwriting "${prefixedName}"`,
+    );
+    return;
+  }
+  map[baseName] = value;
+  await logger.warn(
+    `collision: ${kind} "${baseName}" already taken and no namespace to fall back to; overwriting`,
+  );
 }
 
 export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
@@ -16,6 +51,7 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
       config: async (config: Record<string, unknown>) => {
         const agentMap = (config.agent ??= {}) as Record<string, unknown>;
         const commandMap = (config.command ??= {}) as Record<string, unknown>;
+        const mcpMap = (config.mcp ??= {}) as Record<string, unknown>;
         const skillPerms = (config.permission ??= {}) as Record<
           string,
           unknown
@@ -23,100 +59,59 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
         const skillMap = (skillPerms.skill ??= {}) as Record<string, unknown>;
 
         for (const source of bridgeConfig.sources) {
-          const { agents, commands, skillCommands, deniedSkills } =
+          const { agents, commands, skillCommands, deniedSkills, skillMcps } =
             await loadSource(source, logger);
 
-          // Register agents with collision-fallback logic
           for (const [baseName, cfg] of Object.entries(agents)) {
-            if (!agentMap[baseName]) {
-              // No collision: register under baseName
-              agentMap[baseName] = cfg;
-            } else if (source.namespace) {
-              // Collision with namespace: try prefixed name
-              const prefixedName = `${source.namespace}/${baseName}`;
-              if (!agentMap[prefixedName]) {
-                // Prefixed name is free: register there
-                agentMap[prefixedName] = cfg;
-                await logger.info(
-                  `collision: agent "${baseName}" already taken; registered as "${prefixedName}"`,
-                );
-              } else {
-                // Both baseName and prefixed name taken: overwrite prefixed
-                agentMap[prefixedName] = cfg;
-                await logger.warn(
-                  `collision: both "${baseName}" and "${prefixedName}" already taken; overwriting "${prefixedName}"`,
-                );
-              }
-            } else {
-              // Collision without namespace: overwrite baseName
-              agentMap[baseName] = cfg;
-              await logger.warn(
-                `collision: agent "${baseName}" already taken and no namespace to fall back to; overwriting`,
-              );
-            }
+            await registerWithCollision(
+              agentMap,
+              baseName,
+              cfg,
+              "agent",
+              source.namespace,
+              "/",
+              logger,
+            );
           }
 
-          // Register commands with collision-fallback logic
           for (const [baseName, cfg] of Object.entries(commands)) {
-            if (!commandMap[baseName]) {
-              // No collision: register under baseName
-              commandMap[baseName] = cfg;
-            } else if (source.namespace) {
-              // Collision with namespace: try prefixed name
-              const prefixedName = `${source.namespace}/${baseName}`;
-              if (!commandMap[prefixedName]) {
-                // Prefixed name is free: register there
-                commandMap[prefixedName] = cfg;
-                await logger.info(
-                  `collision: command "${baseName}" already taken; registered as "${prefixedName}"`,
-                );
-              } else {
-                // Both baseName and prefixed name taken: overwrite prefixed
-                commandMap[prefixedName] = cfg;
-                await logger.warn(
-                  `collision: both "${baseName}" and "${prefixedName}" already taken; overwriting "${prefixedName}"`,
-                );
-              }
-            } else {
-              // Collision without namespace: overwrite baseName
-              commandMap[baseName] = cfg;
-              await logger.warn(
-                `collision: command "${baseName}" already taken and no namespace to fall back to; overwriting`,
-              );
-            }
+            await registerWithCollision(
+              commandMap,
+              baseName,
+              cfg,
+              "command",
+              source.namespace,
+              "/",
+              logger,
+            );
           }
 
-          // Register skill-commands with collision-fallback logic
           for (const [baseName, cfg] of Object.entries(skillCommands)) {
-            if (!commandMap[baseName]) {
-              // No collision: register under baseName
-              commandMap[baseName] = cfg;
-            } else if (source.namespace) {
-              // Collision with namespace: try prefixed name
-              const prefixedName = `${source.namespace}/${baseName}`;
-              if (!commandMap[prefixedName]) {
-                // Prefixed name is free: register there
-                commandMap[prefixedName] = cfg;
-                await logger.info(
-                  `collision: skill-command "${baseName}" already taken; registered as "${prefixedName}"`,
-                );
-              } else {
-                // Both baseName and prefixed name taken: overwrite prefixed
-                commandMap[prefixedName] = cfg;
-                await logger.warn(
-                  `collision: both "${baseName}" and "${prefixedName}" already taken; overwriting "${prefixedName}"`,
-                );
-              }
-            } else {
-              // Collision without namespace: overwrite baseName
-              commandMap[baseName] = cfg;
-              await logger.warn(
-                `collision: skill-command "${baseName}" already taken and no namespace to fall back to; overwriting`,
-              );
-            }
+            await registerWithCollision(
+              commandMap,
+              baseName,
+              cfg,
+              "skill-command",
+              source.namespace,
+              "/",
+              logger,
+            );
           }
 
-          // Apply skill denials
+          for (const [mcpName, mcpCfg] of Object.entries(
+            skillMcps as Record<string, TranslatedMcp>,
+          )) {
+            await registerWithCollision(
+              mcpMap,
+              mcpName,
+              mcpCfg,
+              "mcp",
+              source.namespace,
+              "-",
+              logger,
+            );
+          }
+
           for (const name of deniedSkills) {
             if (skillMap[name] && skillMap[name] !== "deny") {
               await logger.warn(

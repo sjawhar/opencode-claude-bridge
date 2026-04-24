@@ -61,5 +61,20 @@ describe("loadSource", () => {
     const result = await loadSource({ dir: empty }, logger);
     expect(result.deniedSkills).toEqual([]);
     expect(result.skillCommands).toEqual({});
+    expect(result.skillMcps).toEqual({});
+  });
+
+  test("aggregates MCPs from all skill SKILL.md files in the source dir", async () => {
+    const result = await loadSource({ dir: sjawhar }, logger);
+    expect(Object.keys(result.skillMcps)).toContain("slack");
+    expect(Object.keys(result.skillMcps)).toContain("playwright");
+    expect(Object.keys(result.skillMcps)).toContain("upstream");
+    expect(result.skillMcps.slack).toMatchObject({ type: "local" });
+    expect(result.skillMcps.upstream).toMatchObject({ type: "remote" });
+  });
+
+  test("omits skillMcps when skills: false", async () => {
+    const result = await loadSource({ dir: sjawhar, skills: false }, logger);
+    expect(result.skillMcps).toEqual({});
   });
 });

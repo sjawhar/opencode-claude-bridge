@@ -13,7 +13,8 @@
     "lint": "bunx biome check src/ test/"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.1.19"
+    "@opencode-ai/plugin": "^1.1.19",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",

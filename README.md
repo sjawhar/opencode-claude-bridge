@@ -1,6 +1,6 @@
 # @sjawhar/opencode-claude-bridge
 
-Register Claude Code agents and commands into OpenCode via the plugin `config` hook. Skills are intentionally not handled — OpenCode already discovers them natively from `.claude/skills/` and `~/.claude/skills/`.
+Register Claude Code agents, commands, and skill-embedded MCP servers into OpenCode via the plugin `config` hook.
 
 ## Install
 
@@ -28,7 +28,7 @@ export const MyBridge = createClaudeBridge({
 });
 ```
 
-Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills in `<dir>/skills/` are scanned for `disable-model-invocation: true` (see below).
+Each source is scanned for `<dir>/agents/*.md`, `<dir>/commands/*.md`, and `<dir>/skills/*/SKILL.md`. Skills are registered as slash-commands, have their `disable-model-invocation: true` flag respected (see below), and have their `mcp:` frontmatter block translated into OpenCode `config.mcp` entries.
 
 ### Source options
 
@@ -37,14 +37,14 @@ Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills
 | `dir` | `string` | — (required) | Path to a directory with Claude-format `agents/` and/or `commands/` subdirs |
 | `agents` | `string \| false` | `"agents"` | Subdir to scan for agent `.md` files; `false` to skip |
 | `commands` | `string \| false` | `"commands"` | Subdir to scan for command `.md` files; `false` to skip |
-| `skills` | `string \| false` | `"skills"` | Subdir to scan for skill `.md` files with `disable-model-invocation: true`; `false` to skip |
-| `namespace` | `string` | — | Prefix added to every registered agent/command name, hyphen-separated |
+| `skills` | `string \| false` | `"skills"` | Subdir to scan for skill `SKILL.md` files (registered as commands, with `mcp:` blocks extracted and `disable-model-invocation: true` enforced as `deny` permissions); `false` to skip |
+| `namespace` | `string` | — | Used as a fallback prefix on name collisions — see [Collision handling](#collision-handling) |
 
 ## Agent translation (Claude `.md` → OpenCode `config.agent`)
 
 | Claude frontmatter | OpenCode config | Translation |
 |---|---|---|
-| `name` (or filename) | object key | `${namespace}-${name}` if namespace set, else `name` |
+| `name` (or filename) | object key | `name` (or filename if no `name`); on collision falls back to `${namespace}/${name}` — see [Collision handling](#collision-handling) |
 | `description` | `description` | pass through |
 | `model: opus\|sonnet\|haiku` | `model` | map to `anthropic/claude-opus-4-6` / `sonnet-4-6` / `haiku-4-5`; pass through `provider/id` format; drop `inherit` |
 | `tools: "Read, Edit, ..."` | `tools` | split, lowercase, build `{read: true, edit: true, ...}` |
@@ -56,7 +56,7 @@ Each source is scanned for `<dir>/agents/*.md` and `<dir>/commands/*.md`. Skills
 
 | Claude frontmatter | OpenCode config | Translation |
 |---|---|---|
-| filename | object key | `${namespace}-${name}` if namespace set, else `name` |
+| filename | object key | filename (without `.md`); on collision falls back to `${namespace}/${name}` — see [Collision handling](#collision-handling) |
 | `description` | `description` | pass through |
 | body | `template` | wrap as `<command-instruction>...\n</command-instruction>\n\n<user-request>\n$ARGUMENTS\n</user-request>` |
 | `agent` | `agent` | pass through |
@@ -84,21 +84,53 @@ createBridge({
 
 If a skill already has a different permission set in `config.permission.skill[<name>]`, the bridge will overwrite it with `"deny"` and log a warning.
 
+## Skill MCP servers (frontmatter `mcp:` block)
+
+OpenCode natively discovers `SKILL.md` files but only reads a small fixed set of frontmatter fields (`name`, `description`, `license`, `compatibility`, `metadata`) — any `mcp:` block is silently ignored. This bridge parses the `mcp:` block and registers each server under `config.mcp[<name>]` so the model gets the corresponding `<name>_<tool>` tools at session start.
+
+### Supported shapes (per server)
+
+**Local (Claude Code style)** — `command` is a string, `args` is an optional array, `env` is an optional string map:
+
+```yaml
+mcp:
+  slack:
+    command: secrets
+    args: ["SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"]
+    env:
+      SLACK_MCP_ADD_MESSAGE_TOOL: "true"
+```
+
+Translated to `{ type: "local", command: ["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"], environment: { ... } }`.
+
+**Local (array-command style)** — `command` is already the full `argv` array; `args`/`env` optional:
+
+```yaml
+mcp:
+  playwright:
+    command: ["npx", "-y", "@playwright/mcp@latest"]
+```
+
+**Remote** — `type: remote` (or presence of `url`) with `url` and optional `headers`:
+
+```yaml
+mcp:
+  upstream:
+    type: remote
+    url: https://mcp.example.com/mcp
+    headers:
+      Authorization: "Bearer ${UPSTREAM_TOKEN}"
+```
+
+A server is treated as **remote** when `type: remote` or a `url` is present. Otherwise it is treated as **local** and must have a `command`. Servers with shapes that match neither (e.g. missing both `command` and `url`, or non-string `command`/`args`/`env`/`headers` values) are skipped with a `warn`-level log.
+
+### MCP collision handling
+
+If a server name already exists in `config.mcp` (e.g. user-defined in `opencode.json`), the bridge uses `${namespace}-${serverName}` as a fallback. Without a namespace, the bridge overwrites the existing entry and logs a warning — same policy as agents and commands. The `-` separator (vs `/` for agents/commands) keeps the resulting Anthropic tool name `<server>_<tool>` inside the `^[a-zA-Z0-9_-]{1,128}$` allowlist.
+
 ## Skills (native OpenCode discovery)
-## Skills in slash-command autocomplete
 
-OpenCode's `/` autocomplete is populated from the command registry, not from skills. Skills are slash-invocable at runtime (OpenCode falls back to skill lookup for unknown `/foo`), but they don't appear in autocomplete.
-
-To fix this, the bridge ALSO registers every scanned skill as a command. The skill's body is wrapped in the same `<command-instruction>...$ARGUMENTS` template used for regular commands. This does NOT remove the skill from OpenCode's skill catalog — the model can still auto-discover it unless `disable-model-invocation: true` is set.
-
-The net effect:
-- Plain skills: visible to model, in user autocomplete.
-- Skills with `disable-model-invocation: true`: hidden from model, in user autocomplete (Claude semantics).
-
-**Note on path rewriting:** The bridge does NOT rewrite `.claude/` paths in skill bodies (unlike agents and commands). Skills are discoverable through two paths — the bridge-registered command AND OpenCode's native skill tool — and OpenCode only controls the latter. Applying path rewrites asymmetrically would make the two paths diverge. Skill authors should use tool-neutral paths.
-
-
-Skills are **not** handled by this plugin beyond permission management (see above). OpenCode natively discovers skills from:
+Beyond permissions and MCPs, skill bodies are left to OpenCode's native discovery. OpenCode scans:
 
 - `.opencode/skills/<name>/SKILL.md` (project-local OpenCode)
 - `~/.config/opencode/skills/<name>/SKILL.md` (global OpenCode)
@@ -109,13 +141,14 @@ If you want OpenCode to see skills from an arbitrary directory, symlink them int
 
 ## Collision handling
 
-When two sources produce the same final agent or command name, **the later source wins** and a `warn`-level log is emitted via `client.app.log`. Use `namespace` on each source to avoid collisions by construction.
+When a source produces a name that already exists in the target map (`config.agent`, `config.command`, or `config.mcp`), the bridge uses `${namespace}${separator}${baseName}` as a fallback — `/` separator for agents and commands, `-` for MCPs (to keep tool names within the Anthropic API's `^[a-zA-Z0-9_-]{1,128}$` allowlist). Without a namespace, the bridge overwrites the existing entry and logs a `warn`. Use `namespace` on each source to avoid collisions by construction.
 
 ## Logging
 
 Runtime messages go to OpenCode's log via `client.app.log({ body: { service: "opencode-claude-bridge", level, message, extra? } })`. Levels used:
 
-- `warn` — name collisions, file read failures
+- `warn` — collision overwrites, duplicate names within a source, malformed `mcp:` shapes, file read or skill translation failures, overriding existing skill permissions
+- `info` — collision fallbacks (registering under the namespaced name)
 - `debug` — dropped unrecognized fields (e.g. invalid color names)
 
 If the plugin is loaded outside OpenCode (tests, unit-level usage), messages fall back to `console`.

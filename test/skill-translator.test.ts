@@ -64,4 +64,65 @@ describe("translateSkillFile", () => {
     const result = await translateSkillFile("/nope/SKILL.md", logger);
     expect(result).toBeNull();
   });
+
+  test("extracts no mcps when frontmatter has no mcp block", async () => {
+    const fixture = path.join(
+      import.meta.dir,
+      "fixtures/sjawhar/skills/public-thing/SKILL.md",
+    );
+    const result = await translateSkillFile(fixture, logger);
+    expect(result?.mcps).toEqual({});
+  });
+
+  test("translates Claude-shape local MCP (command+args+env) to OpenCode shape", async () => {
+    const fixture = path.join(
+      import.meta.dir,
+      "fixtures/sjawhar/skills/slack-bot-like/SKILL.md",
+    );
+    const result = await translateSkillFile(fixture, logger);
+    expect(result?.baseName).toBe("slack-bot-like");
+    expect(result?.mcps).toEqual({
+      slack: {
+        type: "local",
+        command: ["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"],
+        environment: {
+          SLACK_MCP_ADD_MESSAGE_TOOL: "true",
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder preserved verbatim for MCP host interpolation
+          SOPS_AGE_KEY: "${SOPS_AGE_KEY}",
+        },
+      },
+    });
+  });
+
+  test("passes array-shaped command through as-is with no args/env", async () => {
+    const fixture = path.join(
+      import.meta.dir,
+      "fixtures/sjawhar/skills/playwright-like/SKILL.md",
+    );
+    const result = await translateSkillFile(fixture, logger);
+    expect(result?.mcps).toEqual({
+      playwright: {
+        type: "local",
+        command: ["npx", "-y", "@playwright/mcp@latest"],
+      },
+    });
+  });
+
+  test("passes remote-typed MCP through with url and headers", async () => {
+    const fixture = path.join(
+      import.meta.dir,
+      "fixtures/sjawhar/skills/remote-mcp/SKILL.md",
+    );
+    const result = await translateSkillFile(fixture, logger);
+    expect(result?.mcps).toEqual({
+      upstream: {
+        type: "remote",
+        url: "https://mcp.example.com/mcp",
+        headers: {
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder preserved verbatim for MCP host interpolation
+          Authorization: "Bearer ${UPSTREAM_TOKEN}",
+        },
+      },
+    });
+  });
 });
