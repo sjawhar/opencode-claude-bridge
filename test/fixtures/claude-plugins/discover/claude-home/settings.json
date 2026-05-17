@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "plugin-skills@market-a": true,
+    "plugin-disabled@market-x": false
+  }
+}

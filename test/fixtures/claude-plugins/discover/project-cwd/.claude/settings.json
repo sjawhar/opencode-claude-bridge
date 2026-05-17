@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "plugin-mcp@market-b": true,
+    "plugin-orphan@market-c": true,
+    "plugin-multi@market-d": true,
+    "plugin-missing@market-x": true
+  }
+}

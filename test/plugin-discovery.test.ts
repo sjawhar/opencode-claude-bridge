@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
-import { utimesSync } from "node:fs";
+import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
+  discoverClaudePlugins,
   readEnabledPlugins,
   readInstalledRegistry,
   scanCache,
@@ -23,6 +24,23 @@ function makeLogger() {
 const F = path.join(import.meta.dir, "fixtures/claude-plugins/settings");
 const REG = path.join(import.meta.dir, "fixtures/claude-plugins/registry");
 const CACHE = path.join(import.meta.dir, "fixtures/claude-plugins/cache");
+const DISC = path.join(import.meta.dir, "fixtures/claude-plugins/discover");
+
+function rewriteRegistryPaths(claudeHome: string) {
+  const regPath = path.join(claudeHome, "plugins/installed_plugins.json");
+  const raw = readFileSync(regPath, "utf-8");
+  const targets = [
+    path.join(claudeHome, "plugins/cache/market-a/plugin-skills/1.0.0"),
+    path.join(claudeHome, "plugins/cache/market-b/plugin-mcp/2.5.0"),
+    path.join(claudeHome, "plugins/cache/market-d/plugin-multi/2.0.0"),
+  ];
+  let i = 0;
+  const out = raw.replace(
+    /REPLACE_ME_AT_TEST_TIME/g,
+    () => targets[i++] ?? "X",
+  );
+  writeFileSync(regPath, out);
+}
 
 describe("readEnabledPlugins", () => {
   test("reads user-level enabledPlugins when only user file exists", async () => {
@@ -172,5 +190,69 @@ describe("scanCache", () => {
       out["plugin-multi@market-m"].installPath.endsWith("/plugin-multi/1.0.0"),
     ).toBe(true);
     expect(out["plugin-multi@market-m"].version).toBe("1.0.0");
+  });
+});
+
+describe("discoverClaudePlugins", () => {
+  test("emits sources for every enabled plugin with a resolvable path", async () => {
+    const claudeHome = path.join(DISC, "claude-home");
+    rewriteRegistryPaths(claudeHome);
+
+    // Force plugin-multi/2.0.0 to be newer than 1.0.0 so cache-scan would also prefer it.
+    const newer = path.join(
+      claudeHome,
+      "plugins/cache/market-d/plugin-multi/2.0.0",
+    );
+    const t = new Date(Date.now() + 60_000);
+    utimesSync(newer, t, t);
+
+    const { logger, warn } = makeLogger();
+    const sources = await discoverClaudePlugins({
+      claudeConfigDir: claudeHome,
+      cwd: path.join(DISC, "project-cwd"),
+      logger,
+    });
+
+    const byNs = new Map(sources.map((s) => [s.namespace, s]));
+
+    // plugin-skills: enabled in user settings, in registry → resolved via registry
+    expect(
+      byNs.get("plugin-skills")?.dir.endsWith("/market-a/plugin-skills/1.0.0"),
+    ).toBe(true);
+
+    // plugin-mcp: enabled in project settings, in registry
+    expect(
+      byNs.get("plugin-mcp")?.dir.endsWith("/market-b/plugin-mcp/2.5.0"),
+    ).toBe(true);
+
+    // plugin-orphan: enabled in project settings, NOT in registry → resolved via cache scan
+    expect(
+      byNs.get("plugin-orphan")?.dir.endsWith("/market-c/plugin-orphan/0.1.0"),
+    ).toBe(true);
+
+    // plugin-multi: in registry AND on disk; registry version (2.0.0) should win
+    expect(
+      byNs.get("plugin-multi")?.dir.endsWith("/market-d/plugin-multi/2.0.0"),
+    ).toBe(true);
+
+    // plugin-disabled@market-x explicitly disabled in user settings → absent
+    expect(byNs.has("plugin-disabled")).toBe(false);
+
+    // plugin-missing@market-x: settings says enabled but no install on disk → warn + skip
+    expect(byNs.has("plugin-missing")).toBe(false);
+    const warnCalls = (warn.mock.calls as unknown[]).map((c) =>
+      String((c as unknown[])[0]),
+    );
+    expect(warnCalls.some((m) => m.includes("plugin-missing"))).toBe(true);
+  });
+
+  test("returns empty array when no claude config dir provided plugins", async () => {
+    const { logger } = makeLogger();
+    const sources = await discoverClaudePlugins({
+      claudeConfigDir: path.join(DISC, "../settings/empty"),
+      cwd: path.join(DISC, "../settings/empty"),
+      logger,
+    });
+    expect(sources).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Logger } from "./logger";
+import type { ClaudeBridgeSource } from "./source-loader";
 
 export interface ReadEnabledPluginsOptions {
   claudeConfigDir: string;
@@ -174,4 +175,60 @@ export async function scanCache(
     }
   }
   return out;
+}
+
+export interface DiscoverOptions {
+  claudeConfigDir: string;
+  cwd: string;
+  logger: Logger;
+}
+
+function splitKey(key: string): { name: string; marketplace: string } | null {
+  const idx = key.indexOf("@");
+  if (idx <= 0 || idx === key.length - 1) return null;
+  return { name: key.slice(0, idx), marketplace: key.slice(idx + 1) };
+}
+
+export async function discoverClaudePlugins(
+  opts: DiscoverOptions,
+): Promise<ClaudeBridgeSource[]> {
+  const [enabled, registry, cache] = await Promise.all([
+    readEnabledPlugins(opts),
+    readInstalledRegistry(opts.claudeConfigDir, opts.logger),
+    scanCache(opts.claudeConfigDir, opts.logger),
+  ]);
+
+  const allKeys = new Set<string>([
+    ...Object.keys(registry),
+    ...Object.keys(cache),
+    ...Object.keys(enabled),
+  ]);
+
+  const sources: ClaudeBridgeSource[] = [];
+  for (const key of allKeys) {
+    if (enabled[key] === false) continue;
+
+    const parts = splitKey(key);
+    if (!parts) {
+      await opts.logger.warn(
+        `Skipping plugin key "${key}": expected "name@marketplace" format.`,
+      );
+      continue;
+    }
+
+    let entry = registry[key];
+    if (!entry || !existsSync(entry.installPath)) {
+      entry = cache[key];
+    }
+    if (!entry) {
+      await opts.logger.warn(
+        `Plugin "${key}" is enabled in settings but no installation found at ${opts.claudeConfigDir}.`,
+      );
+      continue;
+    }
+
+    sources.push({ dir: entry.installPath, namespace: parts.name });
+  }
+
+  return sources;
 }
