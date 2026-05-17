@@ -40,6 +40,70 @@ Each source is scanned for `<dir>/agents/*.md`, `<dir>/commands/*.md`, and `<dir
 | `skills` | `string \| false` | `"skills"` | Subdir to scan for skill `SKILL.md` files (registered as commands, with `mcp:` blocks extracted and `disable-model-invocation: true` enforced as `deny` permissions); `false` to skip |
 | `namespace` | `string` | — | Used as a fallback prefix on name collisions — see [Collision handling](#collision-handling) |
 
+## Claude Code marketplace plugin discovery
+
+Set `claudePlugins: true` to automatically load every plugin that claude code's settings consider enabled, at both user scope (`<CLAUDE_CONFIG_DIR>/settings.json`) and project scope (`<cwd>/.claude/settings.json`):
+
+```ts
+createClaudeBridge({
+  sources: [...your hand-listed sources...],
+  claudePlugins: true,
+});
+```
+
+This means the same `enabledPlugins` flag that controls what claude code loads also controls what OpenCode picks up — no second config edit needed when you `/plugin install` something new.
+
+Discovery algorithm:
+
+1. Reads `enabledPlugins` from both settings files. Project settings override user settings on key conflict.
+2. Enumerates plugins from `<CLAUDE_CONFIG_DIR>/plugins/installed_plugins.json` (v2 or v3 format) **and** from the directory layout `<CLAUDE_CONFIG_DIR>/plugins/cache/<marketplace>/<plugin>/<version>/`. The union of both is the candidate set.
+3. A plugin loads unless `enabledPlugins` explicitly maps its key to `false`. Absence means enabled — matching claude code's default behavior.
+4. Path resolution prefers `installed_plugins.json` (canonical) and falls back to the cache directory (handles claude's "orphaned" plugins where the registry entry was pruned but files remain on disk). Multiple versions in cache → newest mtime wins.
+5. Each resolved plugin becomes a `ClaudeBridgeSource` with `dir = <installPath>` and `namespace = <plugin name>`. Existing translators handle `agents/`, `commands/`, and `skills/`.
+
+Discovered sources are concatenated **after** hand-listed sources, so your explicit `sources` entries occupy unprefixed slots; discovered plugins fall back to namespace-prefixed names on collision (per the existing collision handler).
+
+### Test overrides
+
+Pass an object for explicit control (used by the test suite to inject fixture directories):
+
+```ts
+createClaudeBridge({
+  sources: [],
+  claudePlugins: {
+    claudeConfigDir: "/tmp/fake-claude-home",
+    cwd: "/tmp/fake-project",
+  },
+});
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `claudeConfigDir` | `process.env.CLAUDE_CONFIG_DIR` or `<homedir>/.claude` | Where to look for `settings.json` and `plugins/` |
+| `cwd` | `process.cwd()` | Where to look for `<cwd>/.claude/settings.json` (project-scoped enables) |
+
+## Root-level `.mcp.json` and `${CLAUDE_PLUGIN_ROOT}`
+
+Plugins that ship MCP servers at the plugin root (alongside `agents/` and `skills/`) — not embedded in skill frontmatter — are also picked up. The file uses the same schema as Claude's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/server.sh",
+      "args": ["--config", "${CLAUDE_PLUGIN_ROOT}/etc/cfg.toml"]
+    }
+  }
+}
+```
+
+The `${CLAUDE_PLUGIN_ROOT}` token is expanded to the source's absolute `dir` value (the plugin install path for discovered sources, or the explicit `dir` for hand-listed sources). Expansion applies to:
+
+- Every MCP server's `command`, `args`, `env`, `cwd`, and `url` (mandatory — these become shell exec args).
+- Agent prompts, command bodies, and skill bodies (cosmetic — keeps content shown to the LLM internally consistent).
+
+This loader runs on **every** source, not just discovered ones. Hand-listed sources can ship a `.mcp.json` at their `dir` root if needed.
+
 ## Agent translation (Claude `.md` → OpenCode `config.agent`)
 
 | Claude frontmatter | OpenCode config | Translation |
