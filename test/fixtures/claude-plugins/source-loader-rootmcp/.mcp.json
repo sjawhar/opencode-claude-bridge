@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "rooted": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/server.sh",
+      "args": ["--config", "${CLAUDE_PLUGIN_ROOT}/etc/cfg.toml"],
+      "env": { "DATA": "${CLAUDE_PLUGIN_ROOT}/data" }
+    }
+  }
+}

@@ -2,9 +2,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { translateAgentFile } from "./agent-translator";
 import { translateCommandFile } from "./command-translator";
+import { expandPluginRoot } from "./expand-plugin-root";
 
 import type { Logger } from "./logger";
 import type { TranslatedMcp } from "./mcp-translator";
+import { loadRootMcp } from "./root-mcp-loader";
 import { translateSkillFile } from "./skill-translator";
 
 export interface ClaudeBridgeSource {
@@ -132,5 +134,41 @@ export async function loadSource(
     skillMcps = result.mcps;
   }
 
-  return { agents, commands, skillCommands, deniedSkills, skillMcps };
+  // Load any root-level .mcp.json (plugins that ship MCP servers directly).
+  const rootMcps = await loadRootMcp(source.dir, logger);
+  for (const [name, cfg] of Object.entries(rootMcps)) {
+    if (skillMcps[name]) {
+      await logger.warn(
+        `Duplicate MCP server name "${name}" in source ${source.dir} (root .mcp.json vs skill-embedded)`,
+      );
+    }
+    skillMcps[name] = cfg;
+  }
+
+  // Expand ${CLAUDE_PLUGIN_ROOT} tokens throughout translated output so the
+  // values shown to OpenCode (and ultimately the LLM and shell) are concrete paths.
+  const expandedAgents: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(agents)) {
+    expandedAgents[k] = expandPluginRoot(v, source.dir);
+  }
+  const expandedCommands: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(commands)) {
+    expandedCommands[k] = expandPluginRoot(v, source.dir);
+  }
+  const expandedSkillCommands: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(skillCommands)) {
+    expandedSkillCommands[k] = expandPluginRoot(v, source.dir);
+  }
+  const expandedSkillMcps: Record<string, TranslatedMcp> = {};
+  for (const [k, v] of Object.entries(skillMcps)) {
+    expandedSkillMcps[k] = expandPluginRoot(v, source.dir);
+  }
+
+  return {
+    agents: expandedAgents,
+    commands: expandedCommands,
+    skillCommands: expandedSkillCommands,
+    deniedSkills,
+    skillMcps: expandedSkillMcps,
+  };
 }
