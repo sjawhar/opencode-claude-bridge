@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createClaudeBridge } from "../src/index";
+import { copyClaudeHomeFixtureWithRealPaths } from "./helpers/claude-fixtures";
 
 async function runBridge(config: Parameters<typeof createClaudeBridge>[0]) {
   const plugin = createClaudeBridge(config);
@@ -24,25 +24,11 @@ async function runBridge(config: Parameters<typeof createClaudeBridge>[0]) {
 
 const DISC = path.join(import.meta.dir, "fixtures/claude-plugins/discover");
 
-function rewriteRegistryPaths(claudeHome: string) {
-  const regPath = path.join(claudeHome, "plugins/installed_plugins.json");
-  const raw = readFileSync(regPath, "utf-8");
-  const targets = [
-    path.join(claudeHome, "plugins/cache/market-a/plugin-skills/1.0.0"),
-    path.join(claudeHome, "plugins/cache/market-b/plugin-mcp/2.5.0"),
-    path.join(claudeHome, "plugins/cache/market-d/plugin-multi/2.0.0"),
-  ];
-  let i = 0;
-  writeFileSync(
-    regPath,
-    raw.replace(/REPLACE_ME_AT_TEST_TIME/g, () => targets[i++] ?? "X"),
-  );
-}
-
 describe("createClaudeBridge with claudePlugins discovery", () => {
   test("loads discovered plugin sources alongside hand-listed sources", async () => {
-    const claudeHome = path.join(DISC, "claude-home");
-    rewriteRegistryPaths(claudeHome);
+    const claudeHome = copyClaudeHomeFixtureWithRealPaths(
+      path.join(DISC, "claude-home"),
+    );
 
     const cfg = await runBridge({
       sources: [],
@@ -58,8 +44,9 @@ describe("createClaudeBridge with claudePlugins discovery", () => {
   });
 
   test("user-listed sources occupy unprefixed slots; discovered ones namespace-fallback on collision", async () => {
-    const claudeHome = path.join(DISC, "claude-home");
-    rewriteRegistryPaths(claudeHome);
+    const claudeHome = copyClaudeHomeFixtureWithRealPaths(
+      path.join(DISC, "claude-home"),
+    );
 
     const handPath = path.join(
       claudeHome,

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { utimesSync } from "node:fs";
 import path from "node:path";
 import {
   discoverClaudePlugins,
@@ -7,6 +7,7 @@ import {
   readInstalledRegistry,
   scanCache,
 } from "../src/plugin-discovery";
+import { copyClaudeHomeFixtureWithRealPaths } from "./helpers/claude-fixtures";
 
 function makeLogger() {
   const warn = mock(async () => {});
@@ -25,22 +26,6 @@ const F = path.join(import.meta.dir, "fixtures/claude-plugins/settings");
 const REG = path.join(import.meta.dir, "fixtures/claude-plugins/registry");
 const CACHE = path.join(import.meta.dir, "fixtures/claude-plugins/cache");
 const DISC = path.join(import.meta.dir, "fixtures/claude-plugins/discover");
-
-function rewriteRegistryPaths(claudeHome: string) {
-  const regPath = path.join(claudeHome, "plugins/installed_plugins.json");
-  const raw = readFileSync(regPath, "utf-8");
-  const targets = [
-    path.join(claudeHome, "plugins/cache/market-a/plugin-skills/1.0.0"),
-    path.join(claudeHome, "plugins/cache/market-b/plugin-mcp/2.5.0"),
-    path.join(claudeHome, "plugins/cache/market-d/plugin-multi/2.0.0"),
-  ];
-  let i = 0;
-  const out = raw.replace(
-    /REPLACE_ME_AT_TEST_TIME/g,
-    () => targets[i++] ?? "X",
-  );
-  writeFileSync(regPath, out);
-}
 
 describe("readEnabledPlugins", () => {
   test("reads user-level enabledPlugins when only user file exists", async () => {
@@ -195,8 +180,9 @@ describe("scanCache", () => {
 
 describe("discoverClaudePlugins", () => {
   test("emits sources for every enabled plugin with a resolvable path", async () => {
-    const claudeHome = path.join(DISC, "claude-home");
-    rewriteRegistryPaths(claudeHome);
+    const claudeHome = copyClaudeHomeFixtureWithRealPaths(
+      path.join(DISC, "claude-home"),
+    );
 
     // Force plugin-multi/2.0.0 to be newer than 1.0.0 so cache-scan would also prefer it.
     const newer = path.join(
