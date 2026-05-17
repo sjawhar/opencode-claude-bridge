@@ -51,12 +51,12 @@ function toStringMap(value: unknown): Record<string, string> | null {
 async function translateSingle(
   serverName: string,
   raw: unknown,
-  skillName: string,
+  sourceLabel: string,
   logger: Logger,
 ): Promise<TranslatedMcp | null> {
   if (!isPlainObject(raw)) {
     await logger.warn(
-      `Skipping MCP "${serverName}" in skill "${skillName}": server config must be an object.`,
+      `Skipping MCP "${serverName}" in source "${sourceLabel}": server config must be an object.`,
     );
     return null;
   }
@@ -67,14 +67,14 @@ async function translateSingle(
   if (isRemote) {
     if (typeof raw.url !== "string" || raw.url.length === 0) {
       await logger.warn(
-        `Skipping remote MCP "${serverName}" in skill "${skillName}": missing url.`,
+        `Skipping remote MCP "${serverName}" in source "${sourceLabel}": missing url.`,
       );
       return null;
     }
     const headers = toStringMap(raw.headers);
     if (headers === null) {
       await logger.warn(
-        `Skipping remote MCP "${serverName}" in skill "${skillName}": headers must be a string map.`,
+        `Skipping remote MCP "${serverName}" in source "${sourceLabel}": headers must be a string map.`,
       );
       return null;
     }
@@ -90,21 +90,21 @@ async function translateSingle(
   const commandParts = toStringArray(raw.command);
   if (commandParts === null || commandParts.length === 0) {
     await logger.warn(
-      `Skipping local MCP "${serverName}" in skill "${skillName}": invalid or missing command.`,
+      `Skipping local MCP "${serverName}" in source "${sourceLabel}": invalid or missing command.`,
     );
     return null;
   }
   const argsParts = toStringArray(raw.args);
   if (argsParts === null) {
     await logger.warn(
-      `Skipping local MCP "${serverName}" in skill "${skillName}": args must be a string array.`,
+      `Skipping local MCP "${serverName}" in source "${sourceLabel}": args must be a string array.`,
     );
     return null;
   }
   const environment = toStringMap(raw.env);
   if (environment === null) {
     await logger.warn(
-      `Skipping local MCP "${serverName}" in skill "${skillName}": env must be a string map.`,
+      `Skipping local MCP "${serverName}" in source "${sourceLabel}": env must be a string map.`,
     );
     return null;
   }
@@ -120,13 +120,13 @@ async function translateSingle(
 
 export async function translateMcpBlock(
   raw: unknown,
-  skillName: string,
+  sourceLabel: string,
   logger: Logger,
 ): Promise<Record<string, TranslatedMcp>> {
   if (raw === undefined || raw === null) return {};
   if (!isPlainObject(raw)) {
     await logger.warn(
-      `Skipping "mcp" block in skill "${skillName}": expected an object keyed by server name.`,
+      `Skipping "mcp" block in source "${sourceLabel}": expected an object keyed by server name.`,
     );
     return {};
   }
@@ -136,7 +136,7 @@ export async function translateMcpBlock(
     const translated = await translateSingle(
       serverName,
       serverConfig,
-      skillName,
+      sourceLabel,
       logger,
     );
     if (translated) out[serverName] = translated;
