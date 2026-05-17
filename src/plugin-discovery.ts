@@ -143,7 +143,6 @@ export async function readInstalledRegistry(
 
 export async function scanCache(
   claudeConfigDir: string,
-  _logger: Logger,
 ): Promise<Record<string, RegistryEntry>> {
   const cacheRoot = join(claudeConfigDir, "plugins", "cache");
   if (!existsSync(cacheRoot)) return {};
@@ -166,6 +165,8 @@ export async function scanCache(
         });
       }
       if (versions.length === 0) continue;
+      // Pick the most recently-installed version. mtime works across non-semver
+      // version dirs (e.g. claude sometimes uses commit hashes as version names).
       versions.sort((a, b) => b.mtimeMs - a.mtimeMs);
       const picked = versions[0];
       out[`${pluginEntry.name}@${marketEntry.name}`] = {
@@ -177,16 +178,12 @@ export async function scanCache(
   return out;
 }
 
-export interface DiscoverOptions {
-  claudeConfigDir: string;
-  cwd: string;
-  logger: Logger;
-}
+export type DiscoverOptions = ReadEnabledPluginsOptions;
 
-function splitKey(key: string): { name: string; marketplace: string } | null {
+function pluginNameFromKey(key: string): string | null {
   const idx = key.indexOf("@");
   if (idx <= 0 || idx === key.length - 1) return null;
-  return { name: key.slice(0, idx), marketplace: key.slice(idx + 1) };
+  return key.slice(0, idx);
 }
 
 export async function discoverClaudePlugins(
@@ -195,7 +192,7 @@ export async function discoverClaudePlugins(
   const [enabled, registry, cache] = await Promise.all([
     readEnabledPlugins(opts),
     readInstalledRegistry(opts.claudeConfigDir, opts.logger),
-    scanCache(opts.claudeConfigDir, opts.logger),
+    scanCache(opts.claudeConfigDir),
   ]);
 
   const allKeys = new Set<string>([
@@ -208,8 +205,8 @@ export async function discoverClaudePlugins(
   for (const key of allKeys) {
     if (enabled[key] === false) continue;
 
-    const parts = splitKey(key);
-    if (!parts) {
+    const name = pluginNameFromKey(key);
+    if (!name) {
       await opts.logger.warn(
         `Skipping plugin key "${key}": expected "name@marketplace" format.`,
       );
@@ -227,7 +224,7 @@ export async function discoverClaudePlugins(
       continue;
     }
 
-    sources.push({ dir: entry.installPath, namespace: parts.name });
+    sources.push({ dir: entry.installPath, namespace: name });
   }
 
   return sources;

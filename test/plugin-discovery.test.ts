@@ -141,8 +141,7 @@ describe("readInstalledRegistry", () => {
 
 describe("scanCache", () => {
   test("enumerates every <marketplace>/<plugin>/<version> triple", async () => {
-    const { logger } = makeLogger();
-    const out = await scanCache(path.join(CACHE, "populated"), logger);
+    const out = await scanCache(path.join(CACHE, "populated"));
     expect(Object.keys(out).sort()).toEqual([
       "plugin-x@market-a",
       "plugin-y@market-a",
@@ -154,14 +153,12 @@ describe("scanCache", () => {
   });
 
   test("returns empty map when cache dir absent", async () => {
-    const { logger } = makeLogger();
-    const out = await scanCache(path.join(CACHE, "empty"), logger);
+    const out = await scanCache(path.join(CACHE, "empty"));
     // "empty" has plugins/cache/ but no subdirs
     expect(out).toEqual({});
   });
 
   test("picks the most recent mtime when multiple versions exist", async () => {
-    const { logger } = makeLogger();
     // Force a specific newest-mtime order: bump 1.0.0 to be newer than 2.0.0
     const target = path.join(
       CACHE,
@@ -170,7 +167,7 @@ describe("scanCache", () => {
     const future = new Date(Date.now() + 60_000);
     utimesSync(target, future, future);
 
-    const out = await scanCache(path.join(CACHE, "multi"), logger);
+    const out = await scanCache(path.join(CACHE, "multi"));
     expect(
       out["plugin-multi@market-m"].installPath.endsWith("/plugin-multi/1.0.0"),
     ).toBe(true);

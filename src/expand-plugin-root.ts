@@ -1,8 +1,6 @@
-const TOKEN = "$" + "{CLAUDE_PLUGIN_ROOT}";
+import { isPlainObject } from "./coerce";
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const TOKEN = "$" + "{CLAUDE_PLUGIN_ROOT}";
 
 export function expandPluginRoot<T>(value: T, pluginRoot: string): T {
   if (typeof value === "string") {

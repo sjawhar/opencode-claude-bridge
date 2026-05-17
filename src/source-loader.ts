@@ -25,6 +25,12 @@ export interface LoadedSource {
   skillMcps: Record<string, TranslatedMcp>;
 }
 
+function expandMap<T>(map: Record<string, T>, root: string): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [k, v] of Object.entries(map)) out[k] = expandPluginRoot(v, root);
+  return out;
+}
+
 function listMarkdown(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
@@ -147,28 +153,11 @@ export async function loadSource(
 
   // Expand ${CLAUDE_PLUGIN_ROOT} tokens throughout translated output so the
   // values shown to OpenCode (and ultimately the LLM and shell) are concrete paths.
-  const expandedAgents: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(agents)) {
-    expandedAgents[k] = expandPluginRoot(v, source.dir);
-  }
-  const expandedCommands: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(commands)) {
-    expandedCommands[k] = expandPluginRoot(v, source.dir);
-  }
-  const expandedSkillCommands: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(skillCommands)) {
-    expandedSkillCommands[k] = expandPluginRoot(v, source.dir);
-  }
-  const expandedSkillMcps: Record<string, TranslatedMcp> = {};
-  for (const [k, v] of Object.entries(skillMcps)) {
-    expandedSkillMcps[k] = expandPluginRoot(v, source.dir);
-  }
-
   return {
-    agents: expandedAgents,
-    commands: expandedCommands,
-    skillCommands: expandedSkillCommands,
+    agents: expandMap(agents, source.dir),
+    commands: expandMap(commands, source.dir),
+    skillCommands: expandMap(skillCommands, source.dir),
     deniedSkills,
-    skillMcps: expandedSkillMcps,
+    skillMcps: expandMap(skillMcps, source.dir),
   };
 }

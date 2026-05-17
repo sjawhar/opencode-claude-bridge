@@ -1,3 +1,4 @@
+import { isPlainObject } from "./coerce";
 import type { Logger } from "./logger";
 
 export interface TranslatedLocalMcp {
@@ -18,10 +19,6 @@ export interface TranslatedRemoteMcp {
 }
 
 export type TranslatedMcp = TranslatedLocalMcp | TranslatedRemoteMcp;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function toStringArray(value: unknown): string[] | null {
   if (value === undefined || value === null) return [];
