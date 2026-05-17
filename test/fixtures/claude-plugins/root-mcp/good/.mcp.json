@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "alpha": { "command": "node", "args": ["server.js"] },
+    "beta": { "url": "https://example.com/mcp" }
+  }
+}
