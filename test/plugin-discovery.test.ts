@@ -1,8 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
+import { utimesSync } from "node:fs";
 import path from "node:path";
 import {
   readEnabledPlugins,
   readInstalledRegistry,
+  scanCache,
 } from "../src/plugin-discovery";
 
 function makeLogger() {
@@ -20,6 +22,7 @@ function makeLogger() {
 
 const F = path.join(import.meta.dir, "fixtures/claude-plugins/settings");
 const REG = path.join(import.meta.dir, "fixtures/claude-plugins/registry");
+const CACHE = path.join(import.meta.dir, "fixtures/claude-plugins/cache");
 
 describe("readEnabledPlugins", () => {
   test("reads user-level enabledPlugins when only user file exists", async () => {
@@ -130,5 +133,44 @@ describe("readInstalledRegistry", () => {
     );
     expect(out).toEqual({});
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("scanCache", () => {
+  test("enumerates every <marketplace>/<plugin>/<version> triple", async () => {
+    const { logger } = makeLogger();
+    const out = await scanCache(path.join(CACHE, "populated"), logger);
+    expect(Object.keys(out).sort()).toEqual([
+      "plugin-x@market-a",
+      "plugin-y@market-a",
+      "plugin-z@market-b",
+    ]);
+    expect(
+      out["plugin-x@market-a"].installPath.endsWith("/market-a/plugin-x/1.0.0"),
+    ).toBe(true);
+  });
+
+  test("returns empty map when cache dir absent", async () => {
+    const { logger } = makeLogger();
+    const out = await scanCache(path.join(CACHE, "empty"), logger);
+    // "empty" has plugins/cache/ but no subdirs
+    expect(out).toEqual({});
+  });
+
+  test("picks the most recent mtime when multiple versions exist", async () => {
+    const { logger } = makeLogger();
+    // Force a specific newest-mtime order: bump 1.0.0 to be newer than 2.0.0
+    const target = path.join(
+      CACHE,
+      "multi/plugins/cache/market-m/plugin-multi/1.0.0",
+    );
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(target, future, future);
+
+    const out = await scanCache(path.join(CACHE, "multi"), logger);
+    expect(
+      out["plugin-multi@market-m"].installPath.endsWith("/plugin-multi/1.0.0"),
+    ).toBe(true);
+    expect(out["plugin-multi@market-m"].version).toBe("1.0.0");
   });
 });

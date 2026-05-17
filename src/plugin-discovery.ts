@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Logger } from "./logger";
 
@@ -138,4 +138,40 @@ export async function readInstalledRegistry(
     `Unrecognized installed_plugins.json schema at ${filePath}; cache scan will be used as fallback.`,
   );
   return {};
+}
+
+export async function scanCache(
+  claudeConfigDir: string,
+  _logger: Logger,
+): Promise<Record<string, RegistryEntry>> {
+  const cacheRoot = join(claudeConfigDir, "plugins", "cache");
+  if (!existsSync(cacheRoot)) return {};
+
+  const out: Record<string, RegistryEntry> = {};
+  for (const marketEntry of readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (!marketEntry.isDirectory()) continue;
+    const marketDir = join(cacheRoot, marketEntry.name);
+    for (const pluginEntry of readdirSync(marketDir, { withFileTypes: true })) {
+      if (!pluginEntry.isDirectory()) continue;
+      const pluginDir = join(marketDir, pluginEntry.name);
+      const versions: { name: string; mtimeMs: number; path: string }[] = [];
+      for (const verEntry of readdirSync(pluginDir, { withFileTypes: true })) {
+        if (!verEntry.isDirectory()) continue;
+        const p = join(pluginDir, verEntry.name);
+        versions.push({
+          name: verEntry.name,
+          mtimeMs: statSync(p).mtimeMs,
+          path: p,
+        });
+      }
+      if (versions.length === 0) continue;
+      versions.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      const picked = versions[0];
+      out[`${pluginEntry.name}@${marketEntry.name}`] = {
+        installPath: picked.path,
+        version: picked.name,
+      };
+    }
+  }
+  return out;
 }
