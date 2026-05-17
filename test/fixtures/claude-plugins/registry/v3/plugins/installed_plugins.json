@@ -1,0 +1,10 @@
+[
+  {
+    "name": "gamma",
+    "marketplace": "market-c",
+    "scope": "user",
+    "installPath": "/fake/path/to/gamma",
+    "version": "2.0.0",
+    "lastUpdated": "2026-02-01T00:00:00Z"
+  }
+]

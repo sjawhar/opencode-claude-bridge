@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
-import { readEnabledPlugins } from "../src/plugin-discovery";
+import {
+  readEnabledPlugins,
+  readInstalledRegistry,
+} from "../src/plugin-discovery";
 
 function makeLogger() {
   const warn = mock(async () => {});
@@ -16,6 +19,7 @@ function makeLogger() {
 }
 
 const F = path.join(import.meta.dir, "fixtures/claude-plugins/settings");
+const REG = path.join(import.meta.dir, "fixtures/claude-plugins/registry");
 
 describe("readEnabledPlugins", () => {
   test("reads user-level enabledPlugins when only user file exists", async () => {
@@ -70,6 +74,60 @@ describe("readEnabledPlugins", () => {
       cwd: path.join(F, "malformed"),
       logger,
     });
+    expect(out).toEqual({});
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("readInstalledRegistry", () => {
+  test("parses v2 format and yields name@marketplace keys", async () => {
+    const { logger } = makeLogger();
+    const out = await readInstalledRegistry(path.join(REG, "v2"), logger);
+    expect(out).toEqual({
+      "alpha@market-a": {
+        installPath: "/fake/path/to/alpha",
+        version: "1.2.3",
+      },
+      "beta@market-b": { installPath: "/fake/path/to/beta", version: "0.1.0" },
+    });
+  });
+
+  test("parses v3 flat-array format", async () => {
+    const { logger } = makeLogger();
+    const out = await readInstalledRegistry(path.join(REG, "v3"), logger);
+    expect(out).toEqual({
+      "gamma@market-c": {
+        installPath: "/fake/path/to/gamma",
+        version: "2.0.0",
+      },
+    });
+  });
+
+  test("ignores v1 format and logs info", async () => {
+    const info = mock(async () => {});
+    const logger = {
+      debug: mock(async () => {}),
+      info,
+      warn: mock(async () => {}),
+      error: mock(async () => {}),
+    };
+    const out = await readInstalledRegistry(path.join(REG, "v1"), logger);
+    expect(out).toEqual({});
+    expect(info).toHaveBeenCalled();
+  });
+
+  test("returns empty map when file is missing", async () => {
+    const { logger } = makeLogger();
+    const out = await readInstalledRegistry(path.join(REG, "missing"), logger);
+    expect(out).toEqual({});
+  });
+
+  test("returns empty map and warns when file is malformed", async () => {
+    const { logger, warn } = makeLogger();
+    const out = await readInstalledRegistry(
+      path.join(REG, "malformed"),
+      logger,
+    );
     expect(out).toEqual({});
     expect(warn).toHaveBeenCalled();
   });
