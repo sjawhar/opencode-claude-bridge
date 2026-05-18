@@ -56,9 +56,12 @@ function parseMarketplaces(
     const sourceType = (source as Record<string, unknown>).source;
     if (typeof sourceType !== "string") continue;
     const repoRaw = (source as Record<string, unknown>).repo;
+    if (repoRaw !== undefined && typeof repoRaw !== "string") continue;
     const repo = typeof repoRaw === "string" ? repoRaw : undefined;
+    const marketplaceSource: MarketplaceSource = { source: sourceType };
+    if (repo !== undefined) marketplaceSource.repo = repo;
     out[name] = {
-      source: { source: sourceType, ...(repo !== undefined && { repo }) },
+      source: marketplaceSource,
     };
   }
   return out;

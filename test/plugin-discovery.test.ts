@@ -125,15 +125,28 @@ describe("readSettings", () => {
     expect(out.marketplaces["user-only-market"]).toBeDefined();
   });
 
-  test("ignores extraKnownMarketplaces entries with malformed source shape", async () => {
+  test("returns empty marketplaces when settings file omits extraKnownMarketplaces", async () => {
     const { logger } = makeLogger();
-    // The user-only fixture has no extraKnownMarketplaces — returns empty map
     const out = await readSettings({
       claudeConfigDir: path.join(F, "user-only"),
       cwd: path.join(F, "user-only"),
       logger,
     });
     expect(out.marketplaces).toEqual({});
+  });
+
+  test("drops malformed marketplace entries but keeps valid ones", async () => {
+    const { logger } = makeLogger();
+    const out = await readSettings({
+      claudeConfigDir: path.join(F, "malformed-markets"),
+      cwd: path.join(F, "malformed-markets"),
+      logger,
+    });
+    // Only the well-formed entry survives
+    expect(Object.keys(out.marketplaces)).toEqual(["good"]);
+    expect(out.marketplaces.good).toEqual({
+      source: { source: "github", repo: "good/repo" },
+    });
   });
 });
 
