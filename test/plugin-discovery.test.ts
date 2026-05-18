@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { utimesSync } from "node:fs";
+import { readFileSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   discoverClaudePlugins,
@@ -291,7 +291,37 @@ describe("discoverClaudePlugins", () => {
     const warnCalls = (warn.mock.calls as unknown[]).map((c) =>
       String((c as unknown[])[0]),
     );
-    expect(warnCalls.some((m) => m.includes("plugin-missing"))).toBe(true);
+    const missingWarn = warnCalls.find((m) => m.includes("plugin-missing"));
+    expect(missingWarn).toBeDefined();
+    expect(missingWarn).toContain(
+      "plugin marketplace add example-org/market-x-source",
+    );
+    expect(missingWarn).toContain("plugin install plugin-missing@market-x");
+  });
+
+  test("falls back to a generic warning when the marketplace is not declared in extraKnownMarketplaces", async () => {
+    const claudeHome = copyClaudeHomeFixtureWithRealPaths(
+      path.join(DISC, "claude-home"),
+    );
+    const userSettingsPath = path.join(claudeHome, "settings.json");
+    const userSettings = JSON.parse(readFileSync(userSettingsPath, "utf-8"));
+    delete userSettings.extraKnownMarketplaces;
+    writeFileSync(userSettingsPath, JSON.stringify(userSettings));
+
+    const { logger, warn } = makeLogger();
+    await discoverClaudePlugins({
+      claudeConfigDir: claudeHome,
+      cwd: path.join(DISC, "project-cwd"),
+      logger,
+    });
+
+    const warnCalls = (warn.mock.calls as unknown[]).map((c) =>
+      String((c as unknown[])[0]),
+    );
+    const missingWarn = warnCalls.find((m) => m.includes("plugin-missing"));
+    expect(missingWarn).toBeDefined();
+    expect(missingWarn).toContain("plugin install plugin-missing@market-x");
+    expect(missingWarn).not.toContain("plugin marketplace add");
   });
 
   test("returns empty array when no claude config dir provided plugins", async () => {

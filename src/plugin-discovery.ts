@@ -239,10 +239,10 @@ export async function scanCache(
 
 export type DiscoverOptions = ReadSettingsOptions;
 
-function pluginNameFromKey(key: string): string | null {
+function splitKey(key: string): { name: string; marketplace: string } | null {
   const idx = key.indexOf("@");
   if (idx <= 0 || idx === key.length - 1) return null;
-  return key.slice(0, idx);
+  return { name: key.slice(0, idx), marketplace: key.slice(idx + 1) };
 }
 
 export async function discoverClaudePlugins(
@@ -254,6 +254,7 @@ export async function discoverClaudePlugins(
     scanCache(opts.claudeConfigDir),
   ]);
   const enabled = settings.enabled;
+  const marketplaces = settings.marketplaces;
 
   const allKeys = new Set<string>([
     ...Object.keys(registry),
@@ -265,8 +266,8 @@ export async function discoverClaudePlugins(
   for (const key of allKeys) {
     if (enabled[key] === false) continue;
 
-    const name = pluginNameFromKey(key);
-    if (!name) {
+    const parts = splitKey(key);
+    if (!parts) {
       await opts.logger.warn(
         `Skipping plugin key "${key}": expected "name@marketplace" format.`,
       );
@@ -278,13 +279,25 @@ export async function discoverClaudePlugins(
       entry = cache[key];
     }
     if (!entry) {
-      await opts.logger.warn(
-        `Plugin "${key}" is enabled in settings but no installation found at ${opts.claudeConfigDir}.`,
-      );
+      const market = marketplaces[parts.marketplace];
+      const githubRepo =
+        market?.source.source === "github" &&
+        typeof market.source.repo === "string"
+          ? market.source.repo
+          : undefined;
+      const lines = [
+        `Plugin "${key}" is enabled in settings but not installed.`,
+        "Run in Claude Code (in this project):",
+      ];
+      if (githubRepo) {
+        lines.push(`  /plugin marketplace add ${githubRepo}`);
+      }
+      lines.push(`  /plugin install ${key}`);
+      await opts.logger.warn(lines.join("\n"));
       continue;
     }
 
-    sources.push({ dir: entry.installPath, namespace: name });
+    sources.push({ dir: entry.installPath, namespace: parts.name });
   }
 
   return sources;
