@@ -63,6 +63,19 @@ Discovery algorithm:
 
 Discovered sources are concatenated **after** hand-listed sources, so your explicit `sources` entries occupy unprefixed slots; discovered plugins fall back to namespace-prefixed names on collision (per the existing collision handler).
 
+### Install hints for unresolved plugins
+
+When `enabledPlugins` references a plugin that is **not installed on disk** (no `installed_plugins.json` entry and nothing in the cache dir), the bridge emits a warning that tells the user exactly how to install it via Claude Code. If the project's `extraKnownMarketplaces` declares the plugin's marketplace as a github source, the warning includes both commands:
+
+```text
+Plugin "verification-skills@verification-skills" is enabled in settings but not installed.
+Run in Claude Code (in this project):
+  /plugin marketplace add theorem-labs/verification-skills
+  /plugin install verification-skills@verification-skills
+```
+
+If the marketplace is not declared (or is a non-github source), the warning falls back to the `/plugin install` line only. The bridge itself never auto-installs — anyone with write access to a project's `.claude/settings.json` could otherwise declare an arbitrary marketplace, so installs stay an explicit user action in Claude Code.
+
 ### Test overrides
 
 Pass an object for explicit control (used by the test suite to inject fixture directories):
