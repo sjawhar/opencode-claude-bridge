@@ -3,39 +3,30 @@ import { join } from "node:path";
 import type { Logger } from "./logger";
 import type { ClaudeBridgeSource } from "./source-loader";
 
-export interface ReadEnabledPluginsOptions {
+export interface ReadSettingsOptions {
   claudeConfigDir: string;
   cwd: string;
   logger: Logger;
 }
 
-async function readSettingsFile(
-  filePath: string,
-  logger: Logger,
-): Promise<Record<string, boolean>> {
-  if (!existsSync(filePath)) return {};
-  let raw: string;
-  try {
-    raw = readFileSync(filePath, "utf-8");
-  } catch (err) {
-    await logger.warn(`Failed to read settings.json: ${filePath}`, {
-      error: String(err),
-    });
-    return {};
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    await logger.warn(`Failed to parse settings.json: ${filePath}`, {
-      error: String(err),
-    });
-    return {};
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {};
-  }
-  const ep = (parsed as Record<string, unknown>).enabledPlugins;
+export interface MarketplaceSource {
+  source: string;
+  repo?: string;
+}
+
+export interface MarketplaceEntry {
+  source: MarketplaceSource;
+}
+
+export interface SettingsResult {
+  enabled: Record<string, boolean>;
+  marketplaces: Record<string, MarketplaceEntry>;
+}
+
+function parseEnabled(
+  parsed: Record<string, unknown>,
+): Record<string, boolean> {
+  const ep = parsed.enabledPlugins;
   if (typeof ep !== "object" || ep === null || Array.isArray(ep)) return {};
   const out: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(ep)) {
@@ -44,14 +35,79 @@ async function readSettingsFile(
   return out;
 }
 
-export async function readEnabledPlugins(
-  opts: ReadEnabledPluginsOptions,
-): Promise<Record<string, boolean>> {
+function parseMarketplaces(
+  parsed: Record<string, unknown>,
+): Record<string, MarketplaceEntry> {
+  const raw = parsed.extraKnownMarketplaces;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, MarketplaceEntry> = {};
+  for (const [name, entry] of Object.entries(raw)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const source = (entry as Record<string, unknown>).source;
+    if (
+      typeof source !== "object" ||
+      source === null ||
+      Array.isArray(source)
+    ) {
+      continue;
+    }
+    const sourceType = (source as Record<string, unknown>).source;
+    if (typeof sourceType !== "string") continue;
+    const repoRaw = (source as Record<string, unknown>).repo;
+    const repo = typeof repoRaw === "string" ? repoRaw : undefined;
+    out[name] = {
+      source: { source: sourceType, ...(repo !== undefined && { repo }) },
+    };
+  }
+  return out;
+}
+
+async function readSettingsFile(
+  filePath: string,
+  logger: Logger,
+): Promise<{
+  enabled: Record<string, boolean>;
+  marketplaces: Record<string, MarketplaceEntry>;
+}> {
+  if (!existsSync(filePath)) return { enabled: {}, marketplaces: {} };
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf-8");
+  } catch (err) {
+    await logger.warn(`Failed to read settings.json: ${filePath}`, {
+      error: String(err),
+    });
+    return { enabled: {}, marketplaces: {} };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    await logger.warn(`Failed to parse settings.json: ${filePath}`, {
+      error: String(err),
+    });
+    return { enabled: {}, marketplaces: {} };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { enabled: {}, marketplaces: {} };
+  }
+  const p = parsed as Record<string, unknown>;
+  return { enabled: parseEnabled(p), marketplaces: parseMarketplaces(p) };
+}
+
+export async function readSettings(
+  opts: ReadSettingsOptions,
+): Promise<SettingsResult> {
   const userPath = join(opts.claudeConfigDir, "settings.json");
   const projectPath = join(opts.cwd, ".claude", "settings.json");
   const user = await readSettingsFile(userPath, opts.logger);
   const project = await readSettingsFile(projectPath, opts.logger);
-  return { ...user, ...project };
+  return {
+    enabled: { ...user.enabled, ...project.enabled },
+    marketplaces: { ...user.marketplaces, ...project.marketplaces },
+  };
 }
 
 export interface RegistryEntry {
@@ -178,7 +234,7 @@ export async function scanCache(
   return out;
 }
 
-export type DiscoverOptions = ReadEnabledPluginsOptions;
+export type DiscoverOptions = ReadSettingsOptions;
 
 function pluginNameFromKey(key: string): string | null {
   const idx = key.indexOf("@");
@@ -189,11 +245,12 @@ function pluginNameFromKey(key: string): string | null {
 export async function discoverClaudePlugins(
   opts: DiscoverOptions,
 ): Promise<ClaudeBridgeSource[]> {
-  const [enabled, registry, cache] = await Promise.all([
-    readEnabledPlugins(opts),
+  const [settings, registry, cache] = await Promise.all([
+    readSettings(opts),
     readInstalledRegistry(opts.claudeConfigDir, opts.logger),
     scanCache(opts.claudeConfigDir),
   ]);
+  const enabled = settings.enabled;
 
   const allKeys = new Set<string>([
     ...Object.keys(registry),

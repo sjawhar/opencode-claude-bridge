@@ -3,8 +3,8 @@ import { utimesSync } from "node:fs";
 import path from "node:path";
 import {
   discoverClaudePlugins,
-  readEnabledPlugins,
   readInstalledRegistry,
+  readSettings,
   scanCache,
 } from "../src/plugin-discovery";
 import { copyClaudeHomeFixtureWithRealPaths } from "./helpers/claude-fixtures";
@@ -27,61 +27,113 @@ const REG = path.join(import.meta.dir, "fixtures/claude-plugins/registry");
 const CACHE = path.join(import.meta.dir, "fixtures/claude-plugins/cache");
 const DISC = path.join(import.meta.dir, "fixtures/claude-plugins/discover");
 
-describe("readEnabledPlugins", () => {
-  test("reads user-level enabledPlugins when only user file exists", async () => {
+describe("readSettings", () => {
+  test("reads enabledPlugins from user-only settings", async () => {
     const { logger } = makeLogger();
-    const out = await readEnabledPlugins({
+    const out = await readSettings({
       claudeConfigDir: path.join(F, "user-only"),
       cwd: path.join(F, "user-only"),
       logger,
     });
-    expect(out).toEqual({ "a@m1": true, "b@m1": false });
+    expect(out.enabled).toEqual({ "a@m1": true, "b@m1": false });
+    expect(out.marketplaces).toEqual({});
   });
 
-  test("reads project-level enabledPlugins when only project file exists", async () => {
+  test("reads enabledPlugins from project-only settings", async () => {
     const { logger } = makeLogger();
-    const out = await readEnabledPlugins({
+    const out = await readSettings({
       claudeConfigDir: path.join(F, "project-only"),
       cwd: path.join(F, "project-only/project-cwd"),
       logger,
     });
-    expect(out).toEqual({ "c@m2": true });
+    expect(out.enabled).toEqual({ "c@m2": true });
+    expect(out.marketplaces).toEqual({});
   });
 
-  test("merges both with project overriding user on key conflict", async () => {
+  test("merges enabledPlugins with project overriding user", async () => {
     const { logger } = makeLogger();
-    const out = await readEnabledPlugins({
+    const out = await readSettings({
       claudeConfigDir: path.join(F, "both"),
       cwd: path.join(F, "both/project-cwd"),
       logger,
     });
-    expect(out).toEqual({
+    expect(out.enabled).toEqual({
       "a@m1": true,
       "shared@m1": true,
       "b@m2": true,
     });
   });
 
-  test("returns empty object when neither file exists", async () => {
+  test("returns empty when neither settings file exists", async () => {
     const { logger, warn } = makeLogger();
-    const out = await readEnabledPlugins({
+    const out = await readSettings({
       claudeConfigDir: path.join(F, "empty"),
       cwd: path.join(F, "empty"),
       logger,
     });
-    expect(out).toEqual({});
+    expect(out).toEqual({ enabled: {}, marketplaces: {} });
     expect(warn).not.toHaveBeenCalled();
   });
 
   test("warns and skips when settings.json is malformed", async () => {
     const { logger, warn } = makeLogger();
-    const out = await readEnabledPlugins({
+    const out = await readSettings({
       claudeConfigDir: path.join(F, "malformed"),
       cwd: path.join(F, "malformed"),
       logger,
     });
-    expect(out).toEqual({});
+    expect(out).toEqual({ enabled: {}, marketplaces: {} });
     expect(warn).toHaveBeenCalled();
+  });
+
+  test("reads extraKnownMarketplaces from user-level settings", async () => {
+    const { logger } = makeLogger();
+    const out = await readSettings({
+      claudeConfigDir: path.join(F, "both"),
+      cwd: path.join(F, "both"),
+      logger,
+    });
+    expect(out.marketplaces["user-only-market"]).toEqual({
+      source: { source: "github", repo: "user/only" },
+    });
+  });
+
+  test("reads extraKnownMarketplaces from project-level settings", async () => {
+    const { logger } = makeLogger();
+    const out = await readSettings({
+      claudeConfigDir: path.join(F, "both"),
+      cwd: path.join(F, "both/project-cwd"),
+      logger,
+    });
+    expect(out.marketplaces.m2).toEqual({
+      source: { source: "github", repo: "user/m2" },
+    });
+  });
+
+  test("merges extraKnownMarketplaces with project overriding user", async () => {
+    const { logger } = makeLogger();
+    const out = await readSettings({
+      claudeConfigDir: path.join(F, "both"),
+      cwd: path.join(F, "both/project-cwd"),
+      logger,
+    });
+    // Project's m1 wins over user's m1
+    expect(out.marketplaces.m1).toEqual({
+      source: { source: "github", repo: "user/m1-project-version" },
+    });
+    // user-only-market survives (no project conflict)
+    expect(out.marketplaces["user-only-market"]).toBeDefined();
+  });
+
+  test("ignores extraKnownMarketplaces entries with malformed source shape", async () => {
+    const { logger } = makeLogger();
+    // The user-only fixture has no extraKnownMarketplaces — returns empty map
+    const out = await readSettings({
+      claudeConfigDir: path.join(F, "user-only"),
+      cwd: path.join(F, "user-only"),
+      logger,
+    });
+    expect(out.marketplaces).toEqual({});
   });
 });
 
