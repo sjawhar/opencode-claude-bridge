@@ -15,3 +15,9 @@ export function asScalarString(value: unknown): string | undefined {
   // Reject objects, arrays, symbols, functions.
   return undefined;
 }
+
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

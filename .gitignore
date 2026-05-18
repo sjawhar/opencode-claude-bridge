@@ -1,3 +1,7 @@
 node_modules
 dist
 .DS_Store
+
+# Agent session state and planning artifacts (Sisyphus / Superpowers)
+.sisyphus/
+docs/superpowers/

@@ -1,13 +1,27 @@
+import os from "node:os";
+import path from "node:path";
 import type { Plugin } from "@opencode-ai/plugin";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { createLogger, type Logger } from "./logger";
 import type { TranslatedMcp } from "./mcp-translator";
+import { discoverClaudePlugins } from "./plugin-discovery";
 import { type ClaudeBridgeSource, loadSource } from "./source-loader";
 
 export type { ClaudeBridgeSource } from "./source-loader";
 
+export interface ClaudeBridgeDiscoveryOptions {
+  /**
+   * Override the claude config directory. Defaults to
+   * `process.env.CLAUDE_CONFIG_DIR` or `<homedir>/.claude`.
+   */
+  claudeConfigDir?: string;
+  /** Override cwd for project-level settings lookup. Defaults to `process.cwd()`. */
+  cwd?: string;
+}
+
 export interface ClaudeBridgeConfig {
   sources: ClaudeBridgeSource[];
+  claudePlugins?: boolean | ClaudeBridgeDiscoveryOptions;
 }
 
 async function registerWithCollision<T>(
@@ -58,7 +72,26 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
         >;
         const skillMap = (skillPerms.skill ??= {}) as Record<string, unknown>;
 
-        for (const source of bridgeConfig.sources) {
+        let allSources: ClaudeBridgeSource[] = bridgeConfig.sources;
+        if (bridgeConfig.claudePlugins) {
+          const opts =
+            bridgeConfig.claudePlugins === true
+              ? {}
+              : bridgeConfig.claudePlugins;
+          const claudeConfigDir =
+            opts.claudeConfigDir ??
+            process.env.CLAUDE_CONFIG_DIR ??
+            path.join(os.homedir(), ".claude");
+          const cwd = opts.cwd ?? process.cwd();
+          const discovered = await discoverClaudePlugins({
+            claudeConfigDir,
+            cwd,
+            logger,
+          });
+          allSources = [...bridgeConfig.sources, ...discovered];
+        }
+
+        for (const source of allSources) {
           const { agents, commands, skillCommands, deniedSkills, skillMcps } =
             await loadSource(source, logger);
 

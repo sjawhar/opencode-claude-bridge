@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "plugins": {
+    "plugin-skills@market-a": [
+      {
+        "scope": "user",
+        "installPath": "REPLACE_ME_AT_TEST_TIME",
+        "version": "1.0.0",
+        "installedAt": "2026-01-01T00:00:00Z",
+        "lastUpdated": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "plugin-mcp@market-b": [
+      {
+        "scope": "user",
+        "installPath": "REPLACE_ME_AT_TEST_TIME",
+        "version": "2.5.0",
+        "installedAt": "2026-01-01T00:00:00Z",
+        "lastUpdated": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "plugin-multi@market-d": [
+      {
+        "scope": "user",
+        "installPath": "REPLACE_ME_AT_TEST_TIME",
+        "version": "2.0.0",
+        "installedAt": "2026-01-01T00:00:00Z",
+        "lastUpdated": "2026-01-01T00:00:00Z"
+      }
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
 import { createLogger } from "../src/logger";
 import { loadSource } from "../src/source-loader";
@@ -76,5 +76,49 @@ describe("loadSource", () => {
   test("omits skillMcps when skills: false", async () => {
     const result = await loadSource({ dir: sjawhar, skills: false }, logger);
     expect(result.skillMcps).toEqual({});
+  });
+});
+
+describe("loadSource: root .mcp.json + CLAUDE_PLUGIN_ROOT expansion", () => {
+  test("loads root .mcp.json entries and expands the token", async () => {
+    const dir = path.join(
+      import.meta.dir,
+      "fixtures/claude-plugins/source-loader-rootmcp",
+    );
+    const logger = {
+      debug: mock(async () => {}),
+      info: mock(async () => {}),
+      warn: mock(async () => {}),
+      error: mock(async () => {}),
+    };
+    const result = await loadSource({ dir }, logger);
+
+    const rooted = result.skillMcps.rooted;
+    expect(rooted).toBeDefined();
+    expect(rooted).toMatchObject({
+      type: "local",
+      command: [`${dir}/bin/server.sh`, "--config", `${dir}/etc/cfg.toml`],
+      environment: { DATA: `${dir}/data` },
+    });
+  });
+
+  test("expands token in skill body templates", async () => {
+    const dir = path.join(
+      import.meta.dir,
+      "fixtures/claude-plugins/source-loader-rootmcp",
+    );
+    const logger = {
+      debug: mock(async () => {}),
+      info: mock(async () => {}),
+      warn: mock(async () => {}),
+      error: mock(async () => {}),
+    };
+    const result = await loadSource({ dir }, logger);
+
+    const skill = result.skillCommands["token-skill"] as { template: string };
+    expect(skill).toBeDefined();
+    expect(skill.template).toContain(`${dir}/bin/helper.sh`);
+    const TOKEN = "$" + "{CLAUDE_PLUGIN_ROOT}";
+    expect(skill.template).not.toContain(TOKEN);
   });
 });
