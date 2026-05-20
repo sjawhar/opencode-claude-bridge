@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createLogger } from "../src/logger";
 import {
   materializeSkill,
+  pruneStaleCache,
   type SkillToMaterialize,
 } from "../src/skill-materializer";
 
@@ -133,5 +136,68 @@ describe("materializeSkill", () => {
       logger,
     );
     expect(result.sourcePushPath).toBe(path.join(tmp, "sjawhar"));
+  });
+});
+
+describe("pruneStaleCache", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = makeTmp();
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function seed(sourceKey: string, skillName: string) {
+    const dir = path.join(tmp, sourceKey, skillName);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "stale\n");
+  }
+
+  test("removes skill dirs not in the live manifest", async () => {
+    seed("sjawhar", "alive");
+    seed("sjawhar", "stale");
+    await pruneStaleCache(
+      tmp,
+      new Set([path.join(tmp, "sjawhar", "alive", "SKILL.md")]),
+      logger,
+    );
+    expect(existsSync(path.join(tmp, "sjawhar", "alive"))).toBe(true);
+    expect(existsSync(path.join(tmp, "sjawhar", "stale"))).toBe(false);
+  });
+
+  test("removes empty source-key dirs after their last skill is pruned", async () => {
+    seed("dead-source", "only-skill");
+    await pruneStaleCache(tmp, new Set(), logger);
+    expect(existsSync(path.join(tmp, "dead-source"))).toBe(false);
+  });
+
+  test("leaves the cache root in place even when fully empty", async () => {
+    seed("k", "s");
+    await pruneStaleCache(tmp, new Set(), logger);
+    expect(existsSync(tmp)).toBe(true);
+  });
+
+  test("no-op when cache root does not exist", async () => {
+    const missing = path.join(tmp, "does-not-exist");
+    await pruneStaleCache(missing, new Set(), logger);
+    expect(existsSync(missing)).toBe(false);
+  });
+
+  test("ignores unrelated files in source-key dirs", async () => {
+    const skillDir = path.join(tmp, "sjawhar", "keepme");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(path.join(skillDir, "SKILL.md"), "ok\n");
+    writeFileSync(path.join(tmp, "sjawhar", "stray.txt"), "leftover");
+    await pruneStaleCache(
+      tmp,
+      new Set([path.join(skillDir, "SKILL.md")]),
+      logger,
+    );
+    // Skill dir still there
+    expect(existsSync(skillDir)).toBe(true);
+    // Stray file was not in any skill dir; prune leaves it; not removed
+    // because the source-key dir is non-empty.
+    expect(existsSync(path.join(tmp, "sjawhar", "stray.txt"))).toBe(true);
   });
 });

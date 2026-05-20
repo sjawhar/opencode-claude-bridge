@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { expandPluginRoot } from "./expand-plugin-root";
@@ -71,4 +78,72 @@ export async function materializeSkill(
   }
 
   return { cachedSkillPath, sourcePushPath };
+}
+
+export async function pruneStaleCache(
+  cacheRoot: string,
+  liveSkillPaths: Set<string>,
+  logger: Logger,
+): Promise<void> {
+  if (!existsSync(cacheRoot)) return;
+
+  let sourceKeys: string[];
+  try {
+    sourceKeys = readdirSync(cacheRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch (err) {
+    await logger.warn(`Failed to read cache root: ${cacheRoot}`, {
+      error: String(err),
+    });
+    return;
+  }
+
+  for (const sourceKey of sourceKeys) {
+    const sourceDir = path.join(cacheRoot, sourceKey);
+    let skillNames: string[];
+    try {
+      skillNames = readdirSync(sourceDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch (err) {
+      await logger.warn(`Failed to read cache source dir: ${sourceDir}`, {
+        error: String(err),
+      });
+      continue;
+    }
+
+    let kept = 0;
+    for (const skillName of skillNames) {
+      const skillDir = path.join(sourceDir, skillName);
+      const skillPath = path.join(skillDir, "SKILL.md");
+      if (liveSkillPaths.has(skillPath)) {
+        kept++;
+        continue;
+      }
+      try {
+        rmSync(skillDir, { recursive: true, force: true });
+      } catch (err) {
+        await logger.warn(`Failed to prune stale skill dir: ${skillDir}`, {
+          error: String(err),
+        });
+      }
+    }
+
+    // If the source-key dir held only skill dirs and they're all gone now,
+    // remove the source-key dir too. Be defensive: re-read entries and remove
+    // only when the entire directory is empty (no leftover files/dirs).
+    if (kept === 0) {
+      try {
+        const remaining = readdirSync(sourceDir);
+        if (remaining.length === 0) {
+          rmSync(sourceDir, { recursive: true, force: true });
+        }
+      } catch (err) {
+        await logger.warn(`Failed to re-read cache source dir: ${sourceDir}`, {
+          error: String(err),
+        });
+      }
+    }
+  }
 }
