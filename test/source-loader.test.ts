@@ -1,4 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createLogger } from "../src/logger";
 import { loadSource } from "../src/source-loader";
@@ -28,7 +30,8 @@ describe("loadSource", () => {
 
   test("skips commands when commands: false", async () => {
     const result = await loadSource({ dir: sjawhar, commands: false }, logger);
-    expect(result.commands).toEqual({});
+    expect(result.commands["no-excuses"]).toBeUndefined();
+    expect(result.commands["public-thing"]).toBeDefined();
     expect(Object.keys(result.agents).length).toBeGreaterThan(0);
   });
 
@@ -41,26 +44,145 @@ describe("loadSource", () => {
     expect(result.agents).toEqual({});
   });
 
-  test("scans skills dir for disable-model-invocation: true and returns skillCommands", async () => {
-    const result = await loadSource({ dir: sjawhar }, logger);
-    expect(result.deniedSkills).toContain("hidden-thing");
-    expect(result.deniedSkills).toContain("derived-name");
-    expect(result.deniedSkills).not.toContain("public-thing");
-    expect(Object.keys(result.skillCommands)).toContain("public-thing");
-    expect(Object.keys(result.skillCommands)).toContain("hidden-thing");
-    expect(Object.keys(result.skillCommands)).toContain("derived-name");
+  test("returns a single per-source push path under cacheRoot/sourceKey", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      const result = await loadSource(
+        { dir: sjawhar, namespace: "sjawhar" },
+        logger,
+        { cacheRoot },
+      );
+      expect(result.skillCachePushPaths).toEqual([
+        path.join(cacheRoot, "sjawhar"),
+      ]);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("materializes every non-disabled skill into the cache", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      await loadSource({ dir: sjawhar, namespace: "sjawhar" }, logger, {
+        cacheRoot,
+      });
+      // public-thing has no disable flag → materialized
+      expect(
+        existsSync(path.join(cacheRoot, "sjawhar", "public-thing", "SKILL.md")),
+      ).toBe(true);
+      // hidden-thing has disable-model-invocation: true → NOT materialized
+      expect(
+        existsSync(path.join(cacheRoot, "sjawhar", "hidden-thing", "SKILL.md")),
+      ).toBe(false);
+      // user-only has user-invocable: false → still materialized (skill side preserved)
+      expect(
+        existsSync(path.join(cacheRoot, "sjawhar", "user-only", "SKILL.md")),
+      ).toBe(true);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("synthesizes name in cache: playwright-like (with no disable flag) materializes correctly", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      await loadSource({ dir: sjawhar, namespace: "sjawhar" }, logger, {
+        cacheRoot,
+      });
+      const file = path.join(
+        cacheRoot,
+        "sjawhar",
+        "playwright-like",
+        "SKILL.md",
+      );
+      expect(existsSync(file)).toBe(true);
+      expect(readFileSync(file, "utf-8")).toContain("name: playwright-like");
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("merges skill-derived commands into the source's commands map", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      const result = await loadSource(
+        { dir: sjawhar, namespace: "sjawhar" },
+        logger,
+        { cacheRoot },
+      );
+      // user-only has user-invocable: false → NOT in commands
+      expect(result.commands["user-only"]).toBeUndefined();
+      // public-thing default → IS in commands, with the templated body
+      const cmd = result.commands["public-thing"] as { template: string };
+      expect(cmd).toBeDefined();
+      expect(cmd.template).toContain("<command-instruction>");
+      expect(cmd.template).toContain("Body for public-thing.");
+      expect(cmd.template).toContain("<user-request>");
+      expect(cmd.template).toContain("$ARGUMENTS");
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("hidden-thing still gets a command entry (disable-model-invocation preserves /name)", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      const result = await loadSource(
+        { dir: sjawhar, namespace: "sjawhar" },
+        logger,
+        { cacheRoot },
+      );
+      expect(result.commands["hidden-thing"]).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("skill MCPs still come through into skillMcps", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      const result = await loadSource(
+        { dir: sjawhar, namespace: "sjawhar" },
+        logger,
+        { cacheRoot },
+      );
+      expect(result.skillMcps.slack).toBeDefined();
+      expect(result.skillMcps.playwright).toBeDefined();
+      expect(result.skillMcps.upstream).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("materializedSkillPaths lists every materialized SKILL.md absolute path", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-src-"));
+    try {
+      const result = await loadSource(
+        { dir: sjawhar, namespace: "sjawhar" },
+        logger,
+        { cacheRoot },
+      );
+      // public-thing, playwright-like, slack-bot-like, remote-mcp, user-only → 5 materialized
+      // (hidden-thing and derived-name have disable-model-invocation: true → excluded)
+      expect(result.materializedSkillPaths.length).toBe(5);
+      for (const p of result.materializedSkillPaths) {
+        expect(existsSync(p)).toBe(true);
+      }
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("skips skills scan when skills: false", async () => {
     const result = await loadSource({ dir: sjawhar, skills: false }, logger);
-    expect(result.deniedSkills).toEqual([]);
-    expect(result.skillCommands).toEqual({});
+    expect(result.skillCachePushPaths).toEqual([]);
+    expect(result.materializedSkillPaths).toEqual([]);
   });
 
-  test("returns empty skillCommands and deniedSkills when skills subdir doesn't exist", async () => {
+  test("returns empty materialization metadata when skills subdir doesn't exist", async () => {
     const result = await loadSource({ dir: empty }, logger);
-    expect(result.deniedSkills).toEqual([]);
-    expect(result.skillCommands).toEqual({});
+    expect(result.skillCachePushPaths).toEqual([]);
+    expect(result.materializedSkillPaths).toEqual([]);
     expect(result.skillMcps).toEqual({});
   });
 
@@ -115,7 +237,7 @@ describe("loadSource: root .mcp.json + CLAUDE_PLUGIN_ROOT expansion", () => {
     };
     const result = await loadSource({ dir }, logger);
 
-    const skill = result.skillCommands["token-skill"] as { template: string };
+    const skill = result.commands["token-skill"] as { template: string };
     expect(skill).toBeDefined();
     expect(skill.template).toContain(`${dir}/bin/helper.sh`);
     const TOKEN = "$" + "{CLAUDE_PLUGIN_ROOT}";
