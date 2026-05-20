@@ -3,39 +3,36 @@ import { join } from "node:path";
 import type { Logger } from "./logger";
 import type { ClaudeBridgeSource } from "./source-loader";
 
-export interface ReadEnabledPluginsOptions {
+export interface ReadSettingsOptions {
   claudeConfigDir: string;
   cwd: string;
   logger: Logger;
 }
 
-async function readSettingsFile(
-  filePath: string,
-  logger: Logger,
-): Promise<Record<string, boolean>> {
-  if (!existsSync(filePath)) return {};
-  let raw: string;
-  try {
-    raw = readFileSync(filePath, "utf-8");
-  } catch (err) {
-    await logger.warn(`Failed to read settings.json: ${filePath}`, {
-      error: String(err),
-    });
-    return {};
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    await logger.warn(`Failed to parse settings.json: ${filePath}`, {
-      error: String(err),
-    });
-    return {};
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {};
-  }
-  const ep = (parsed as Record<string, unknown>).enabledPlugins;
+/**
+ * The `source` block inside an `extraKnownMarketplaces` entry. The nested
+ * `source.source` naming mirrors claude code's actual settings.json schema:
+ * the outer field is `source: { ... }` and the inner discriminator is also
+ * called `source` (`"github"`, possibly other types in future versions).
+ */
+export interface MarketplaceSource {
+  source: string;
+  repo?: string;
+}
+
+export interface MarketplaceEntry {
+  source: MarketplaceSource;
+}
+
+export interface SettingsResult {
+  enabled: Record<string, boolean>;
+  marketplaces: Record<string, MarketplaceEntry>;
+}
+
+function parseEnabled(
+  parsed: Record<string, unknown>,
+): Record<string, boolean> {
+  const ep = parsed.enabledPlugins;
   if (typeof ep !== "object" || ep === null || Array.isArray(ep)) return {};
   const out: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(ep)) {
@@ -44,14 +41,82 @@ async function readSettingsFile(
   return out;
 }
 
-export async function readEnabledPlugins(
-  opts: ReadEnabledPluginsOptions,
-): Promise<Record<string, boolean>> {
+function parseMarketplaces(
+  parsed: Record<string, unknown>,
+): Record<string, MarketplaceEntry> {
+  const raw = parsed.extraKnownMarketplaces;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, MarketplaceEntry> = {};
+  for (const [name, entry] of Object.entries(raw)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      continue;
+    }
+    const source = (entry as Record<string, unknown>).source;
+    if (
+      typeof source !== "object" ||
+      source === null ||
+      Array.isArray(source)
+    ) {
+      continue;
+    }
+    const sourceType = (source as Record<string, unknown>).source;
+    if (typeof sourceType !== "string") continue;
+    const repoRaw = (source as Record<string, unknown>).repo;
+    if (repoRaw !== undefined && typeof repoRaw !== "string") continue;
+    const repo = typeof repoRaw === "string" ? repoRaw : undefined;
+    const marketplaceSource: MarketplaceSource = { source: sourceType };
+    if (repo !== undefined) marketplaceSource.repo = repo;
+    out[name] = {
+      source: marketplaceSource,
+    };
+  }
+  return out;
+}
+
+async function readSettingsFile(
+  filePath: string,
+  logger: Logger,
+): Promise<{
+  enabled: Record<string, boolean>;
+  marketplaces: Record<string, MarketplaceEntry>;
+}> {
+  if (!existsSync(filePath)) return { enabled: {}, marketplaces: {} };
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf-8");
+  } catch (err) {
+    await logger.warn(`Failed to read settings.json: ${filePath}`, {
+      error: String(err),
+    });
+    return { enabled: {}, marketplaces: {} };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    await logger.warn(`Failed to parse settings.json: ${filePath}`, {
+      error: String(err),
+    });
+    return { enabled: {}, marketplaces: {} };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { enabled: {}, marketplaces: {} };
+  }
+  const p = parsed as Record<string, unknown>;
+  return { enabled: parseEnabled(p), marketplaces: parseMarketplaces(p) };
+}
+
+export async function readSettings(
+  opts: ReadSettingsOptions,
+): Promise<SettingsResult> {
   const userPath = join(opts.claudeConfigDir, "settings.json");
   const projectPath = join(opts.cwd, ".claude", "settings.json");
   const user = await readSettingsFile(userPath, opts.logger);
   const project = await readSettingsFile(projectPath, opts.logger);
-  return { ...user, ...project };
+  return {
+    enabled: { ...user.enabled, ...project.enabled },
+    marketplaces: { ...user.marketplaces, ...project.marketplaces },
+  };
 }
 
 export interface RegistryEntry {
@@ -178,22 +243,24 @@ export async function scanCache(
   return out;
 }
 
-export type DiscoverOptions = ReadEnabledPluginsOptions;
+export type DiscoverOptions = ReadSettingsOptions;
 
-function pluginNameFromKey(key: string): string | null {
+function splitKey(key: string): { name: string; marketplace: string } | null {
   const idx = key.indexOf("@");
   if (idx <= 0 || idx === key.length - 1) return null;
-  return key.slice(0, idx);
+  return { name: key.slice(0, idx), marketplace: key.slice(idx + 1) };
 }
 
 export async function discoverClaudePlugins(
   opts: DiscoverOptions,
 ): Promise<ClaudeBridgeSource[]> {
-  const [enabled, registry, cache] = await Promise.all([
-    readEnabledPlugins(opts),
+  const [settings, registry, cache] = await Promise.all([
+    readSettings(opts),
     readInstalledRegistry(opts.claudeConfigDir, opts.logger),
     scanCache(opts.claudeConfigDir),
   ]);
+  const enabled = settings.enabled;
+  const marketplaces = settings.marketplaces;
 
   const allKeys = new Set<string>([
     ...Object.keys(registry),
@@ -205,8 +272,8 @@ export async function discoverClaudePlugins(
   for (const key of allKeys) {
     if (enabled[key] === false) continue;
 
-    const name = pluginNameFromKey(key);
-    if (!name) {
+    const parts = splitKey(key);
+    if (!parts) {
       await opts.logger.warn(
         `Skipping plugin key "${key}": expected "name@marketplace" format.`,
       );
@@ -218,13 +285,47 @@ export async function discoverClaudePlugins(
       entry = cache[key];
     }
     if (!entry) {
-      await opts.logger.warn(
-        `Plugin "${key}" is enabled in settings but no installation found at ${opts.claudeConfigDir}.`,
+      const market = marketplaces[parts.marketplace];
+      const rawRepo =
+        market?.source.source === "github" &&
+        typeof market.source.repo === "string"
+          ? market.source.repo
+          : undefined;
+      // Validate repo is a plain `owner/repo` github slug before printing it in
+      // a copy-pasteable line. Blocks injection of newlines/control/ANSI from a
+      // malicious .claude/settings.json.
+      const safeRepo =
+        rawRepo !== undefined && /^[\w.-]+\/[\w.-]+$/.test(rawRepo)
+          ? rawRepo
+          : undefined;
+      // The key gets quoted into the log AND printed bare in the install line.
+      // Reject anything with whitespace or control chars; that includes the
+      // newline-injection case.
+      const keyLooksSafe = [...key].every(
+        (char) => char.trim() !== "" && (char.codePointAt(0) ?? 0) >= 0x20,
       );
+
+      if (!keyLooksSafe) {
+        const printableKey = JSON.stringify(key).replaceAll("/", "\\u002f");
+        await opts.logger.warn(
+          `Plugin ${printableKey} is enabled in settings but not installed; the plugin key contains unprintable or unexpected characters, so no install commands are suggested.`,
+        );
+        continue;
+      }
+
+      const lines = [
+        `Plugin "${key}" is enabled in settings but not installed.`,
+        `Run in Claude Code (in this project):`,
+      ];
+      if (safeRepo) {
+        lines.push(`  /plugin marketplace add ${safeRepo}`);
+      }
+      lines.push(`  /plugin install ${key}`);
+      await opts.logger.warn(lines.join("\n"));
       continue;
     }
 
-    sources.push({ dir: entry.installPath, namespace: name });
+    sources.push({ dir: entry.installPath, namespace: parts.name });
   }
 
   return sources;

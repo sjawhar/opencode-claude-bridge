@@ -1,0 +1,11 @@
+{
+  "enabledPlugins": { "ok@m": true },
+  "extraKnownMarketplaces": {
+    "entry-not-object": "string-instead-of-object",
+    "source-not-object": { "source": "github" },
+    "source-missing-type": { "source": { "repo": "x/y" } },
+    "source-type-not-string": { "source": { "source": 42, "repo": "x/y" } },
+    "repo-not-string": { "source": { "source": "github", "repo": 99 } },
+    "good": { "source": { "source": "github", "repo": "good/repo" } }
+  }
+}

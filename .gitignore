@@ -2,6 +2,7 @@ node_modules
 dist
 .DS_Store
 
-# Agent session state and planning artifacts (Sisyphus / Superpowers)
+# Agent session state and planning artifacts (Sisyphus / Superpowers / OhMyOpenCode)
 .sisyphus/
 docs/superpowers/
+.omo/

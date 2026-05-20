@@ -1,1 +1,7 @@
-{ "enabledPlugins": { "shared@m1": true, "b@m2": true } }
+{
+  "enabledPlugins": { "shared@m1": true, "b@m2": true },
+  "extraKnownMarketplaces": {
+    "m1": { "source": { "source": "github", "repo": "user/m1-project-version" } },
+    "m2": { "source": { "source": "github", "repo": "user/m2" } }
+  }
+}

@@ -2,5 +2,8 @@
   "enabledPlugins": {
     "plugin-skills@market-a": true,
     "plugin-disabled@market-x": false
+  },
+  "extraKnownMarketplaces": {
+    "market-x": { "source": { "source": "github", "repo": "example-org/market-x-source" } }
   }
 }
