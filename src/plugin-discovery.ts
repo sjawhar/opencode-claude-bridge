@@ -9,6 +9,12 @@ export interface ReadSettingsOptions {
   logger: Logger;
 }
 
+/**
+ * The `source` block inside an `extraKnownMarketplaces` entry. The nested
+ * `source.source` naming mirrors claude code's actual settings.json schema:
+ * the outer field is `source: { ... }` and the inner discriminator is also
+ * called `source` (`"github"`, possibly other types in future versions).
+ */
 export interface MarketplaceSource {
   source: string;
   repo?: string;
@@ -280,17 +286,39 @@ export async function discoverClaudePlugins(
     }
     if (!entry) {
       const market = marketplaces[parts.marketplace];
-      const githubRepo =
+      const rawRepo =
         market?.source.source === "github" &&
         typeof market.source.repo === "string"
           ? market.source.repo
           : undefined;
+      // Validate repo is a plain `owner/repo` github slug before printing it in
+      // a copy-pasteable line. Blocks injection of newlines/control/ANSI from a
+      // malicious .claude/settings.json.
+      const safeRepo =
+        rawRepo !== undefined && /^[\w.-]+\/[\w.-]+$/.test(rawRepo)
+          ? rawRepo
+          : undefined;
+      // The key gets quoted into the log AND printed bare in the install line.
+      // Reject anything with whitespace or control chars; that includes the
+      // newline-injection case.
+      const keyLooksSafe = [...key].every(
+        (char) => char.trim() !== "" && (char.codePointAt(0) ?? 0) >= 0x20,
+      );
+
+      if (!keyLooksSafe) {
+        const printableKey = JSON.stringify(key).replaceAll("/", "\\u002f");
+        await opts.logger.warn(
+          `Plugin ${printableKey} is enabled in settings but not installed; the plugin key contains unprintable or unexpected characters, so no install commands are suggested.`,
+        );
+        continue;
+      }
+
       const lines = [
         `Plugin "${key}" is enabled in settings but not installed.`,
-        "Run in Claude Code (in this project):",
+        `Run in Claude Code (in this project):`,
       ];
-      if (githubRepo) {
-        lines.push(`  /plugin marketplace add ${githubRepo}`);
+      if (safeRepo) {
+        lines.push(`  /plugin marketplace add ${safeRepo}`);
       }
       lines.push(`  /plugin install ${key}`);
       await opts.logger.warn(lines.join("\n"));
