@@ -37,6 +37,14 @@ function makeSkill(over: Partial<SkillToMaterialize> = {}): SkillToMaterialize {
   };
 }
 
+function expectMaterialized(
+  result: Awaited<ReturnType<typeof materializeSkill>>,
+) {
+  expect(result).not.toBeNull();
+  if (!result) throw new Error("Expected skill to materialize");
+  return result;
+}
+
 describe("materializeSkill", () => {
   let tmp: string;
   beforeEach(() => {
@@ -47,9 +55,8 @@ describe("materializeSkill", () => {
   });
 
   test("writes SKILL.md at <cacheRoot>/<sourceKey>/<skillName>/SKILL.md", async () => {
-    const result = await materializeSkill(
-      makeSkill({ cacheRoot: tmp }),
-      logger,
+    const result = expectMaterialized(
+      await materializeSkill(makeSkill({ cacheRoot: tmp }), logger),
     );
     const expected = path.join(tmp, "sjawhar", "public-thing", "SKILL.md");
     expect(result.cachedSkillPath).toBe(expected);
@@ -57,9 +64,11 @@ describe("materializeSkill", () => {
   });
 
   test("writes name + description + body into the materialized file", async () => {
-    const result = await materializeSkill(
-      makeSkill({ cacheRoot: tmp, body: "Hello body." }),
-      logger,
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({ cacheRoot: tmp, body: "Hello body." }),
+        logger,
+      ),
     );
     const content = readFileSync(result.cachedSkillPath, "utf-8");
     expect(content).toContain("name: public-thing");
@@ -68,13 +77,15 @@ describe("materializeSkill", () => {
   });
 
   test(`expands ${pluginRootToken} in body to pluginRoot`, async () => {
-    const result = await materializeSkill(
-      makeSkill({
-        cacheRoot: tmp,
-        pluginRoot: "/abs/source",
-        body: `Run ${pluginRootToken}/bin/x`,
-      }),
-      logger,
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({
+          cacheRoot: tmp,
+          pluginRoot: "/abs/source",
+          body: `Run ${pluginRootToken}/bin/x`,
+        }),
+        logger,
+      ),
     );
     const content = readFileSync(result.cachedSkillPath, "utf-8");
     expect(content).toContain("Run /abs/source/bin/x");
@@ -82,12 +93,14 @@ describe("materializeSkill", () => {
   });
 
   test("passes extra frontmatter fields through unchanged", async () => {
-    const result = await materializeSkill(
-      makeSkill({
-        cacheRoot: tmp,
-        extraFrontmatter: { license: "MIT", "allowed-tools": "Read Write" },
-      }),
-      logger,
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({
+          cacheRoot: tmp,
+          extraFrontmatter: { license: "MIT", "allowed-tools": "Read Write" },
+        }),
+        logger,
+      ),
     );
     const content = readFileSync(result.cachedSkillPath, "utf-8");
     expect(content).toContain("license: MIT");
@@ -95,9 +108,11 @@ describe("materializeSkill", () => {
   });
 
   test("omits description line when description is undefined", async () => {
-    const result = await materializeSkill(
-      makeSkill({ cacheRoot: tmp, description: undefined }),
-      logger,
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({ cacheRoot: tmp, description: undefined }),
+        logger,
+      ),
     );
     const content = readFileSync(result.cachedSkillPath, "utf-8");
     expect(content).not.toContain("description:");
@@ -105,10 +120,10 @@ describe("materializeSkill", () => {
 
   test("is idempotent: second call with identical input does not rewrite the file", async () => {
     const skill = makeSkill({ cacheRoot: tmp });
-    const first = await materializeSkill(skill, logger);
+    const first = expectMaterialized(await materializeSkill(skill, logger));
     const mtime1 = statSync(first.cachedSkillPath).mtimeMs;
     await new Promise((r) => setTimeout(r, 15));
-    const second = await materializeSkill(skill, logger);
+    const second = expectMaterialized(await materializeSkill(skill, logger));
     const mtime2 = statSync(second.cachedSkillPath).mtimeMs;
     expect(second.cachedSkillPath).toBe(first.cachedSkillPath);
     expect(mtime2).toBe(mtime1);
@@ -116,12 +131,11 @@ describe("materializeSkill", () => {
 
   test("rewrites the file when input content changes", async () => {
     const skill = makeSkill({ cacheRoot: tmp });
-    const first = await materializeSkill(skill, logger);
+    const first = expectMaterialized(await materializeSkill(skill, logger));
     const mtime1 = statSync(first.cachedSkillPath).mtimeMs;
     await new Promise((r) => setTimeout(r, 15));
-    const second = await materializeSkill(
-      { ...skill, body: "Different body" },
-      logger,
+    const second = expectMaterialized(
+      await materializeSkill({ ...skill, body: "Different body" }, logger),
     );
     const mtime2 = statSync(second.cachedSkillPath).mtimeMs;
     expect(mtime2).toBeGreaterThan(mtime1);
@@ -131,11 +145,48 @@ describe("materializeSkill", () => {
   });
 
   test("returns the per-source push path", async () => {
-    const result = await materializeSkill(
-      makeSkill({ cacheRoot: tmp, sourceKey: "sjawhar" }),
-      logger,
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({ cacheRoot: tmp, sourceKey: "sjawhar" }),
+        logger,
+      ),
     );
     expect(result.sourcePushPath).toBe(path.join(tmp, "sjawhar"));
+  });
+});
+
+describe("materializeSkill — security/containment", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = makeTmp();
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("refuses to materialize when sourceKey is path-traversal", async () => {
+    const escapeName = `escape-${path.basename(tmp)}`;
+    const result = await materializeSkill(
+      makeSkill({ cacheRoot: tmp, sourceKey: `../${escapeName}` }),
+      logger,
+    );
+    expect(result).toBeNull();
+    expect(existsSync(path.join(path.dirname(tmp), escapeName))).toBe(false);
+  });
+
+  test("refuses to materialize when skillName is path-traversal", async () => {
+    const result = await materializeSkill(
+      makeSkill({ cacheRoot: tmp, sourceKey: "ok", skillName: "../escape" }),
+      logger,
+    );
+    expect(result).toBeNull();
+  });
+
+  test("writes ownership marker on first materialization", async () => {
+    await materializeSkill(makeSkill({ cacheRoot: tmp }), logger);
+    expect(existsSync(path.join(tmp, ".opencode-claude-bridge-cache"))).toBe(
+      true,
+    );
   });
 });
 
@@ -154,9 +205,14 @@ describe("pruneStaleCache", () => {
     writeFileSync(path.join(dir, "SKILL.md"), "stale\n");
   }
 
+  function seedMarker() {
+    writeFileSync(path.join(tmp, ".opencode-claude-bridge-cache"), "marker\n");
+  }
+
   test("removes skill dirs not in the live manifest", async () => {
     seed("sjawhar", "alive");
     seed("sjawhar", "stale");
+    seedMarker();
     await pruneStaleCache(
       tmp,
       new Set([path.join(tmp, "sjawhar", "alive", "SKILL.md")]),
@@ -168,12 +224,14 @@ describe("pruneStaleCache", () => {
 
   test("removes empty source-key dirs after their last skill is pruned", async () => {
     seed("dead-source", "only-skill");
+    seedMarker();
     await pruneStaleCache(tmp, new Set(), logger);
     expect(existsSync(path.join(tmp, "dead-source"))).toBe(false);
   });
 
   test("leaves the cache root in place even when fully empty", async () => {
     seed("k", "s");
+    seedMarker();
     await pruneStaleCache(tmp, new Set(), logger);
     expect(existsSync(tmp)).toBe(true);
   });
@@ -189,6 +247,7 @@ describe("pruneStaleCache", () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(path.join(skillDir, "SKILL.md"), "ok\n");
     writeFileSync(path.join(tmp, "sjawhar", "stray.txt"), "leftover");
+    seedMarker();
     await pruneStaleCache(
       tmp,
       new Set([path.join(skillDir, "SKILL.md")]),
@@ -199,5 +258,18 @@ describe("pruneStaleCache", () => {
     // Stray file was not in any skill dir; prune leaves it; not removed
     // because the source-key dir is non-empty.
     expect(existsSync(path.join(tmp, "sjawhar", "stray.txt"))).toBe(true);
+  });
+
+  test("refuses to prune when ownership marker is absent", async () => {
+    seed("sjawhar", "stale");
+    await pruneStaleCache(tmp, new Set(), logger);
+    expect(existsSync(path.join(tmp, "sjawhar", "stale"))).toBe(true);
+  });
+
+  test("prunes normally when ownership marker is present", async () => {
+    seed("sjawhar", "stale");
+    seedMarker();
+    await pruneStaleCache(tmp, new Set(), logger);
+    expect(existsSync(path.join(tmp, "sjawhar", "stale"))).toBe(false);
   });
 });

@@ -11,6 +11,8 @@ import { stringify as stringifyYaml } from "yaml";
 import { expandPluginRoot } from "./expand-plugin-root";
 import type { Logger } from "./logger";
 
+const CACHE_OWNERSHIP_MARKER = ".opencode-claude-bridge-cache";
+
 export interface SkillToMaterialize {
   /** Absolute cache root, typically `getCacheRoot()`. */
   cacheRoot: string;
@@ -41,6 +43,13 @@ export interface MaterializeResult {
   sourcePushPath: string;
 }
 
+function isContained(child: string, parent: string): boolean {
+  const resolvedParent = path.resolve(parent);
+  const resolvedChild = path.resolve(child);
+  const rel = path.relative(resolvedParent, resolvedChild);
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
 function buildContent(skill: SkillToMaterialize): string {
   const fm: Record<string, unknown> = { name: skill.skillName };
   if (skill.description !== undefined) fm.description = skill.description;
@@ -55,10 +64,20 @@ function buildContent(skill: SkillToMaterialize): string {
 export async function materializeSkill(
   skill: SkillToMaterialize,
   logger: Logger,
-): Promise<MaterializeResult> {
+): Promise<MaterializeResult | null> {
   const sourcePushPath = path.join(skill.cacheRoot, skill.sourceKey);
   const skillDir = path.join(sourcePushPath, skill.skillName);
   const cachedSkillPath = path.join(skillDir, "SKILL.md");
+
+  if (
+    !isContained(sourcePushPath, skill.cacheRoot) ||
+    !isContained(cachedSkillPath, sourcePushPath)
+  ) {
+    await logger.warn(
+      `Refusing to materialize skill "${skill.skillName}" (source key "${skill.sourceKey}"): resolved cache path escapes cacheRoot.`,
+    );
+    return null;
+  }
 
   const next = buildContent(skill);
   let prev: string | undefined;
@@ -73,6 +92,17 @@ export async function materializeSkill(
   }
 
   if (prev !== next) {
+    mkdirSync(skill.cacheRoot, { recursive: true });
+    const markerPath = path.join(skill.cacheRoot, CACHE_OWNERSHIP_MARKER);
+    if (!existsSync(markerPath)) {
+      writeFileSync(
+        markerPath,
+        "This directory is managed by @sjawhar/opencode-claude-bridge.\n" +
+          "It is safe to delete the entire directory; the bridge will recreate it.\n" +
+          "Do NOT place unrelated files here.\n",
+        "utf-8",
+      );
+    }
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(cachedSkillPath, next, "utf-8");
   }
@@ -86,6 +116,14 @@ export async function pruneStaleCache(
   logger: Logger,
 ): Promise<void> {
   if (!existsSync(cacheRoot)) return;
+
+  const markerPath = path.join(cacheRoot, CACHE_OWNERSHIP_MARKER);
+  if (!existsSync(markerPath)) {
+    await logger.warn(
+      `Refusing to prune cache at ${cacheRoot}: ownership marker ${CACHE_OWNERSHIP_MARKER} is missing. This directory may not be a bridge-owned cache.`,
+    );
+    return;
+  }
 
   let sourceKeys: string[];
   try {

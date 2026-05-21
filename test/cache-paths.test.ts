@@ -24,7 +24,7 @@ describe("getCacheRoot", () => {
 });
 
 describe("computeSourceKey", () => {
-  test("returns namespace verbatim when provided", () => {
+  test("returns safe namespace verbatim when provided", () => {
     expect(computeSourceKey("/whatever/path", "sjawhar")).toBe("sjawhar");
   });
 
@@ -43,5 +43,22 @@ describe("computeSourceKey", () => {
     expect(computeSourceKey("/a", "shared")).toBe(
       computeSourceKey("/b", "shared"),
     );
+  });
+
+  test("falls back to hash when namespace contains path-traversal segments", () => {
+    expect(computeSourceKey("/abs/a", "../../etc")).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  test("falls back to hash when namespace contains a slash", () => {
+    expect(computeSourceKey("/abs/a", "foo/bar")).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  test("falls back to hash for empty namespace and falsy values", () => {
+    expect(computeSourceKey("/abs/a", "")).toMatch(/^[0-9a-f]{12}$/);
+  });
+
+  test("accepts a safe namespace verbatim", () => {
+    expect(computeSourceKey("/abs/a", "my-source")).toBe("my-source");
+    expect(computeSourceKey("/abs/a", "namespace.v2")).toBe("namespace.v2");
   });
 });

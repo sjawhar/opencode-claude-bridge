@@ -128,8 +128,10 @@ async function scanSkills(
           },
           logger,
         );
-        pushPath = result.sourcePushPath;
-        materializedPaths.push(result.cachedSkillPath);
+        if (result) {
+          pushPath = result.sourcePushPath;
+          materializedPaths.push(result.cachedSkillPath);
+        }
       } catch (err) {
         await logger.warn(
           `Failed to materialize skill "${skill.name}" from ${skillPath}; skipping skill registration.`,
