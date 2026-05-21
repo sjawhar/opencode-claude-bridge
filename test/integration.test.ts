@@ -394,6 +394,28 @@ describe("dual registration (skill + command surfaces)", () => {
     }
   });
 
+  test("both flags set → neither surface", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+        cacheRoot,
+      });
+      // Not in commands.
+      expect(
+        (config.command as Record<string, unknown>)["double-blocked"],
+      ).toBeUndefined();
+      // Not in cache.
+      expect(
+        existsSync(
+          path.join(cacheRoot, "sjawhar", "double-blocked", "SKILL.md"),
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
   test("prunes stale cache entries on subsequent runs with reduced sources", async () => {
     const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
     try {

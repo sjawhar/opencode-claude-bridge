@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createLogger } from "../src/logger";
@@ -123,6 +129,23 @@ describe("loadSource", () => {
     expect(result.commands["hidden-thing"]).toBeDefined();
   });
 
+  test("flows commandFields (agent/model/subtask) into the registered command", async () => {
+    const result = await loadSource(
+      { dir: sjawhar, namespace: "sjawhar" },
+      logger,
+      { cacheRoot },
+    );
+    const cmd = result.commands["with-command-fields"] as {
+      agent?: string;
+      model?: string;
+      subtask?: boolean;
+    };
+    expect(cmd).toBeDefined();
+    expect(cmd.agent).toBe("my-agent");
+    expect(cmd.model).toBe("anthropic/claude-sonnet-4-6");
+    expect(cmd.subtask).toBe(true);
+  });
+
   test("skill MCPs still come through into skillMcps", async () => {
     const result = await loadSource(
       { dir: sjawhar, namespace: "sjawhar" },
@@ -140,9 +163,11 @@ describe("loadSource", () => {
       logger,
       { cacheRoot },
     );
-    // public-thing, playwright-like, slack-bot-like, remote-mcp, user-only → 5 materialized
-    // (hidden-thing and derived-name have disable-model-invocation: true → excluded)
-    expect(result.materializedSkillPaths.length).toBe(5);
+    // public-thing, playwright-like, slack-bot-like, remote-mcp, user-only,
+    // with-command-fields → 6 materialized
+    // (hidden-thing, derived-name, and double-blocked have
+    // disable-model-invocation: true → excluded)
+    expect(result.materializedSkillPaths.length).toBe(6);
     for (const p of result.materializedSkillPaths) {
       expect(existsSync(p)).toBe(true);
     }
@@ -161,6 +186,33 @@ describe("loadSource", () => {
     expect(result.skillCachePushPaths).toEqual([]);
     expect(result.materializedSkillPaths).toEqual([]);
     expect(result.skillMcps).toEqual({});
+  });
+
+  test("materializeSkill failure does not abort the source loop", async () => {
+    // Pre-create a directory at the SKILL.md target path for "public-thing" so
+    // writeFileSync fails with EISDIR. The other skills should still materialize.
+    mkdirSync(path.join(cacheRoot, "sjawhar", "public-thing", "SKILL.md"), {
+      recursive: true,
+    });
+    const result = await loadSource(
+      { dir: sjawhar, namespace: "sjawhar" },
+      logger,
+      { cacheRoot },
+    );
+    // public-thing's materialization failed (target was a dir, not a file).
+    // The materializedSkillPaths list MUST NOT include public-thing.
+    const publicThingPath = path.join(
+      cacheRoot,
+      "sjawhar",
+      "public-thing",
+      "SKILL.md",
+    );
+    expect(result.materializedSkillPaths).not.toContain(publicThingPath);
+    // But other skills DID materialize.
+    expect(result.materializedSkillPaths.length).toBeGreaterThan(0);
+    // And the command-side registration for public-thing still happened (the
+    // command-side path is independent of materialization).
+    expect(result.commands["public-thing"]).toBeDefined();
   });
 
   test("aggregates MCPs from all skill SKILL.md files in the source dir", async () => {
