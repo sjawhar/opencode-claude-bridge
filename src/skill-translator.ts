@@ -13,26 +13,57 @@ interface SkillFrontmatter {
   agent?: unknown;
   subtask?: unknown;
   "disable-model-invocation"?: unknown;
+  "user-invocable"?: unknown;
   mcp?: unknown;
 }
 
-export interface TranslatedSkillAsCommand {
-  baseName: string;
-  disabled: boolean; // true if disable-model-invocation: true
-  config: {
-    description?: string;
-    template: string;
+const BRIDGE_HANDLED_FIELDS = new Set([
+  "name",
+  "description",
+  "disable-model-invocation",
+  "user-invocable",
+  "mcp",
+  // Command-side fields the bridge consumes (do NOT round-trip them into the
+  // materialized SKILL.md — opencode would ignore them anyway, and stripping
+  // keeps the cache file clean):
+  "agent",
+  "model",
+  "subtask",
+]);
+
+export interface TranslatedSkill {
+  /** Name from frontmatter, else parent directory name. */
+  name: string;
+  /** Description from frontmatter; undefined when absent. */
+  description?: string;
+  /** Raw body (no command-instruction wrapping, no token expansion yet). */
+  body: string;
+  /** Claude Code official: true → suppress skill registration. */
+  disableModelInvocation: boolean;
+  /** Claude Code official: false → suppress command registration. */
+  userInvocable: boolean;
+  /** Frontmatter passed through into the materialized SKILL.md, minus bridge-handled fields. */
+  extraFrontmatter: Record<string, unknown>;
+  /** Extracted MCPs (passed to `config.mcp` by the loader). */
+  mcps: Record<string, TranslatedMcp>;
+  /** Command-side fields the loader uses to build the slash-command config. */
+  commandFields: {
     agent?: string;
     model?: string;
     subtask?: boolean;
   };
-  mcps: Record<string, TranslatedMcp>;
+}
+
+function readBool(value: unknown): boolean | undefined {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return undefined;
 }
 
 export async function translateSkillFile(
   filePath: string,
   logger: Logger,
-): Promise<TranslatedSkillAsCommand | null> {
+): Promise<TranslatedSkill | null> {
   if (!existsSync(filePath)) return null;
 
   let content: string;
@@ -46,28 +77,38 @@ export async function translateSkillFile(
   }
 
   const { data, body } = parseFrontmatter<SkillFrontmatter>(content);
-  const name = asScalarString(data.name);
-  const baseName = name || basename(dirname(filePath));
+  const skillDir = dirname(filePath);
+  const name = asScalarString(data.name) || basename(skillDir);
 
-  const disableRaw = data["disable-model-invocation"];
-  const disabled = disableRaw === true || disableRaw === "true";
+  const disableModelInvocation =
+    readBool(data["disable-model-invocation"]) ?? false;
+  const userInvocable = readBool(data["user-invocable"]) ?? true;
 
-  const template =
-    "<command-instruction>\n" +
-    body.trim() +
-    "\n</command-instruction>\n\n" +
-    "<user-request>\n$ARGUMENTS\n</user-request>";
-
-  const config: TranslatedSkillAsCommand["config"] = { template };
-  const description = asScalarString(data.description);
-  if (description) config.description = description;
+  const commandFields: TranslatedSkill["commandFields"] = {};
   const agent = asScalarString(data.agent);
-  if (agent) config.agent = agent;
+  if (agent) commandFields.agent = agent;
   const model = mapClaudeModel(asScalarString(data.model));
-  if (model) config.model = model;
-  if (typeof data.subtask === "boolean") config.subtask = data.subtask;
+  if (model) commandFields.model = model;
+  if (typeof data.subtask === "boolean") commandFields.subtask = data.subtask;
 
-  const mcps = await translateMcpBlock(data.mcp, baseName, logger);
+  const mcps = await translateMcpBlock(data.mcp, name, logger);
 
-  return { baseName, disabled, config, mcps };
+  const extraFrontmatter: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+    if (BRIDGE_HANDLED_FIELDS.has(k)) continue;
+    extraFrontmatter[k] = v;
+  }
+
+  const result: TranslatedSkill = {
+    name,
+    body: body.trimEnd(),
+    disableModelInvocation,
+    userInvocable,
+    extraFrontmatter,
+    mcps,
+    commandFields,
+  };
+  const description = asScalarString(data.description);
+  if (description) result.description = description;
+  return result;
 }

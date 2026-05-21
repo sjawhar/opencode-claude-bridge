@@ -1,488 +1,438 @@
 import { describe, expect, mock, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { computeSourceKey } from "../src/cache-paths";
 import { createClaudeBridge } from "../src/index";
 
 const sjawhar = path.join(import.meta.dir, "fixtures/sjawhar");
 
+type LogEntry = { body: { level?: string; message?: string } };
+
+function logEntries(logFn: { mock: { calls: unknown[][] } }): LogEntry[] {
+  return logFn.mock.calls
+    .map((call) => call[0])
+    .filter((entry): entry is LogEntry => {
+      if (typeof entry !== "object" || entry === null) return false;
+      const body = (entry as { body?: unknown }).body;
+      return typeof body === "object" && body !== null;
+    });
+}
+
+async function runBridge(
+  bridgeConfig: Parameters<typeof createClaudeBridge>[0],
+  config: Record<string, unknown> = {},
+  logFn = mock(async () => ({})),
+): Promise<Record<string, unknown>> {
+  const plugin = createClaudeBridge(bridgeConfig);
+  const hooks = await (
+    plugin as (ctx: unknown) => Promise<Record<string, unknown>>
+  )({
+    client: { app: { log: logFn } },
+    directory: process.cwd(),
+    worktree: process.cwd(),
+    project: { path: process.cwd() },
+    $: mock(() => ({})),
+  });
+  const configHook = hooks.config as (
+    c: Record<string, unknown>,
+  ) => Promise<void>;
+  await configHook(config);
+  return config;
+}
+
 describe("createClaudeBridge", () => {
   test("populates config.agent and config.command from sources without namespace", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {};
-    await configHook(config);
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar }],
+        cacheRoot,
+      });
 
-    expect(
-      (config.agent as Record<string, unknown>)["bug-finder"],
-    ).toBeDefined();
-    expect(
-      (config.command as Record<string, unknown>)["no-excuses"],
-    ).toBeDefined();
+      expect(
+        (config.agent as Record<string, unknown>)["bug-finder"],
+      ).toBeDefined();
+      expect(
+        (config.command as Record<string, unknown>)["no-excuses"],
+      ).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("applies namespace on collision with pre-existing config entry", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      agent: { "bug-finder": { existing: true } },
-      command: { "no-excuses": { existing: true } },
-    };
-    await configHook(config);
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+          cacheRoot,
+        },
+        {
+          agent: { "bug-finder": { existing: true } },
+          command: { "no-excuses": { existing: true } },
+        },
+      );
 
-    // Pre-existing entries should be untouched
-    expect((config.agent as Record<string, unknown>)["bug-finder"]).toEqual({
-      existing: true,
-    });
-    expect((config.command as Record<string, unknown>)["no-excuses"]).toEqual({
-      existing: true,
-    });
+      // Pre-existing entries should be untouched.
+      expect((config.agent as Record<string, unknown>)["bug-finder"]).toEqual({
+        existing: true,
+      });
+      expect((config.command as Record<string, unknown>)["no-excuses"]).toEqual(
+        {
+          existing: true,
+        },
+      );
 
-    // New entries should be registered under prefixed names
-    expect(
-      (config.agent as Record<string, unknown>)["sjawhar/bug-finder"],
-    ).toBeDefined();
-    expect(
-      (config.command as Record<string, unknown>)["sjawhar/no-excuses"],
-    ).toBeDefined();
+      // New entries should be registered under prefixed names.
+      expect(
+        (config.agent as Record<string, unknown>)["sjawhar/bug-finder"],
+      ).toBeDefined();
+      expect(
+        (config.command as Record<string, unknown>)["sjawhar/no-excuses"],
+      ).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("falls back to overwrite with warning when no namespace and collision", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
     const logFn = mock(async () => ({}));
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: logFn } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      agent: { "bug-finder": { existing: true } },
-    };
-    await configHook(config);
+    try {
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar }],
+          cacheRoot,
+        },
+        {
+          agent: { "bug-finder": { existing: true } },
+        },
+        logFn,
+      );
 
-    // Should overwrite with warning
-    const warnCalls = logFn.mock.calls.filter(
-      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
-    );
-    expect(warnCalls.length).toBeGreaterThan(0);
-    expect(
-      (config.agent as Record<string, unknown>)["bug-finder"],
-    ).toBeDefined();
+      // Should overwrite with warning.
+      const warnCalls = logEntries(logFn).filter(
+        (entry) => entry.body.level === "warn",
+      );
+      expect(warnCalls.length).toBeGreaterThan(0);
+      expect(
+        (config.agent as Record<string, unknown>)["bug-finder"],
+      ).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("uses slash separator in namespace", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      agent: { "bug-finder": { existing: true } },
-    };
-    await configHook(config);
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+          cacheRoot,
+        },
+        {
+          agent: { "bug-finder": { existing: true } },
+        },
+      );
 
-    // Should use slash, not dash
-    expect(
-      (config.agent as Record<string, unknown>)["sjawhar/bug-finder"],
-    ).toBeDefined();
-    expect(
-      (config.agent as Record<string, unknown>)["sjawhar-bug-finder"],
-    ).toBeUndefined();
-  });
-
-  test("writes deny entries to config.permission.skill", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {};
-    await configHook(config);
-
-    const skillPerms = config.permission as Record<string, unknown>;
-    const skillMap = skillPerms.skill as Record<string, unknown>;
-    expect(skillMap["hidden-thing"]).toBe("deny");
-    expect(skillMap["derived-name"]).toBe("deny");
-    expect(skillMap["public-thing"]).toBeUndefined();
-  });
-
-  test("warns when overriding existing non-deny permission", async () => {
-    const logFn = mock(async () => ({}));
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: logFn } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      permission: {
-        skill: { "hidden-thing": "allow" },
-      },
-    };
-    await configHook(config);
-
-    const skillPerms = config.permission as Record<string, unknown>;
-    const skillMap = skillPerms.skill as Record<string, unknown>;
-    expect(skillMap["hidden-thing"]).toBe("deny");
-    const warnCalls = logFn.mock.calls.filter(
-      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
-    );
-    expect(warnCalls.length).toBeGreaterThan(0);
-  });
-
-  test("preserves existing unrelated skill permissions", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      permission: {
-        skill: { "other-skill": "ask" },
-      },
-    };
-    await configHook(config);
-
-    const skillPerms = config.permission as Record<string, unknown>;
-    const skillMap = skillPerms.skill as Record<string, unknown>;
-    expect(skillMap["other-skill"]).toBe("ask");
-  });
-  test("registers skills as commands in config.command", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {};
-    await configHook(config);
-
-    const commandMap = config.command as Record<string, unknown>;
-    expect(commandMap["public-thing"]).toBeDefined();
-    expect(commandMap["hidden-thing"]).toBeDefined();
-    expect(commandMap["derived-name"]).toBeDefined();
-    // Verify they have the command template structure
-    expect(
-      (commandMap["public-thing"] as Record<string, unknown>).template,
-    ).toContain("<command-instruction>");
-  });
-
-  test("namespaces skill-command on collision with pre-existing command", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      command: { "public-thing": { existing: true } },
-    };
-    await configHook(config);
-
-    const commandMap = config.command as Record<string, unknown>;
-    // Pre-existing entry should be untouched
-    expect(commandMap["public-thing"]).toEqual({ existing: true });
-    // Skill should be registered under prefixed name
-    expect(commandMap["sjawhar/public-thing"]).toBeDefined();
+      // Should use slash, not dash.
+      expect(
+        (config.agent as Record<string, unknown>)["sjawhar/bug-finder"],
+      ).toBeDefined();
+      expect(
+        (config.agent as Record<string, unknown>)["sjawhar-bug-finder"],
+      ).toBeUndefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("registers skills as commands in config.command", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {};
-    await configHook(config);
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar }],
+        cacheRoot,
+      });
 
-    const commandMap = config.command as Record<string, unknown>;
-    expect(commandMap["public-thing"]).toBeDefined();
-    expect(commandMap["hidden-thing"]).toBeDefined();
-    expect(commandMap["derived-name"]).toBeDefined();
-    // Verify they have the command template structure
-    expect(
-      (commandMap["public-thing"] as Record<string, unknown>).template,
-    ).toContain("<command-instruction>");
+      const commandMap = config.command as Record<string, unknown>;
+      expect(commandMap["public-thing"]).toBeDefined();
+      expect(commandMap["hidden-thing"]).toBeDefined();
+      expect(commandMap["derived-name"]).toBeDefined();
+      expect(commandMap["user-only"]).toBeUndefined();
+      // Verify they have the command template structure.
+      expect(
+        (commandMap["public-thing"] as Record<string, unknown>).template,
+      ).toContain("<command-instruction>");
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
-  test("namespaces skill-command on collision with pre-existing command", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      command: { "public-thing": { existing: true } },
-    };
-    await configHook(config);
+  test("namespaces skill-derived command on collision with pre-existing command", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+          cacheRoot,
+        },
+        {
+          command: { "public-thing": { existing: true } },
+        },
+      );
 
-    const commandMap = config.command as Record<string, unknown>;
-    // Pre-existing entry should be untouched
-    expect(commandMap["public-thing"]).toEqual({ existing: true });
-    // Skill should be registered under prefixed name
-    expect(commandMap["sjawhar/public-thing"]).toBeDefined();
+      const commandMap = config.command as Record<string, unknown>;
+      // Pre-existing entry should be untouched.
+      expect(commandMap["public-thing"]).toEqual({ existing: true });
+      // Skill-derived command should be registered under prefixed name.
+      expect(commandMap["sjawhar/public-thing"]).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("registers skill MCPs into config.mcp with no collision", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {};
-    await configHook(config);
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar }],
+        cacheRoot,
+      });
 
-    const mcpMap = config.mcp as Record<string, unknown>;
-    expect(mcpMap.slack).toMatchObject({
-      type: "local",
-      command: ["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"],
-    });
-    expect(mcpMap.playwright).toMatchObject({
-      type: "local",
-      command: ["npx", "-y", "@playwright/mcp@latest"],
-    });
-    expect(mcpMap.upstream).toMatchObject({
-      type: "remote",
-      url: "https://mcp.example.com/mcp",
-    });
+      const mcpMap = config.mcp as Record<string, unknown>;
+      expect(mcpMap.slack).toMatchObject({
+        type: "local",
+        command: ["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"],
+      });
+      expect(mcpMap.playwright).toMatchObject({
+        type: "local",
+        command: ["npx", "-y", "@playwright/mcp@latest"],
+      });
+      expect(mcpMap.upstream).toMatchObject({
+        type: "remote",
+        url: "https://mcp.example.com/mcp",
+      });
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("preserves pre-existing config.mcp entries and falls back to namespace-hyphen prefix on collision", async () => {
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: mock(async () => ({})) } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const existingSlack = { type: "local", command: ["external"] };
-    const config: Record<string, unknown> = {
-      mcp: { slack: existingSlack },
-    };
-    await configHook(config);
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const existingSlack = { type: "local", command: ["external"] };
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+          cacheRoot,
+        },
+        {
+          mcp: { slack: existingSlack },
+        },
+      );
 
-    const mcpMap = config.mcp as Record<string, unknown>;
-    // Pre-existing entry must be untouched.
-    expect(mcpMap.slack).toEqual(existingSlack);
-    // Colliding skill MCP registered under hyphen-prefixed name.
-    expect(mcpMap["sjawhar-slack"]).toMatchObject({ type: "local" });
+      const mcpMap = config.mcp as Record<string, unknown>;
+      // Pre-existing entry must be untouched.
+      expect(mcpMap.slack).toEqual(existingSlack);
+      // Colliding skill MCP registered under hyphen-prefixed name.
+      expect(mcpMap["sjawhar-slack"]).toMatchObject({ type: "local" });
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("overwrites with warning on collision without namespace", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
     const logFn = mock(async () => ({}));
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: logFn } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const config: Record<string, unknown> = {
-      mcp: { slack: { type: "local", command: ["external"] } },
-    };
-    await configHook(config);
+    try {
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar }],
+          cacheRoot,
+        },
+        {
+          mcp: { slack: { type: "local", command: ["external"] } },
+        },
+        logFn,
+      );
 
-    const mcpMap = config.mcp as Record<string, unknown>;
-    expect((mcpMap.slack as Record<string, unknown>).command).toEqual([
-      "secrets",
-      "SLACK_MCP_XOXP_TOKEN",
-      "--",
-      "slack-mcp-server",
-    ]);
-    const warnCalls = logFn.mock.calls.filter(
-      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
-    );
-    expect(
-      warnCalls.some((c) =>
-        ((c[0] as { body: { message: string } }).body.message ?? "").includes(
-          "slack",
-        ),
-      ),
-    ).toBe(true);
+      const mcpMap = config.mcp as Record<string, unknown>;
+      expect((mcpMap.slack as Record<string, unknown>).command).toEqual([
+        "secrets",
+        "SLACK_MCP_XOXP_TOKEN",
+        "--",
+        "slack-mcp-server",
+      ]);
+      const warnCalls = logEntries(logFn).filter(
+        (entry) => entry.body.level === "warn",
+      );
+      expect(
+        warnCalls.some((entry) => (entry.body.message ?? "").includes("slack")),
+      ).toBe(true);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("overwrites prefixed MCP with warning when both base and namespaced names are taken", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
     const logFn = mock(async () => ({}));
-    const plugin = createClaudeBridge({
-      sources: [{ dir: sjawhar, namespace: "sjawhar" }],
-    });
-    const hooks = await (
-      plugin as (ctx: unknown) => Promise<Record<string, unknown>>
-    )({
-      client: { app: { log: logFn } },
-      directory: process.cwd(),
-      worktree: process.cwd(),
-      project: { path: process.cwd() },
-      $: mock(() => ({})),
-    });
-    const configHook = hooks.config as (
-      c: Record<string, unknown>,
-    ) => Promise<void>;
-    const existingBase = { type: "local", command: ["existing-base"] };
-    const existingPrefixed = {
-      type: "local",
-      command: ["existing-prefixed"],
-    };
-    const config: Record<string, unknown> = {
-      mcp: {
-        slack: existingBase,
-        "sjawhar-slack": existingPrefixed,
-      },
-    };
-    await configHook(config);
+    try {
+      const existingBase = { type: "local", command: ["existing-base"] };
+      const existingPrefixed = {
+        type: "local",
+        command: ["existing-prefixed"],
+      };
+      const config = await runBridge(
+        {
+          sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+          cacheRoot,
+        },
+        {
+          mcp: {
+            slack: existingBase,
+            "sjawhar-slack": existingPrefixed,
+          },
+        },
+        logFn,
+      );
 
-    const mcpMap = config.mcp as Record<string, unknown>;
-    // Base name pre-existing entry stays put.
-    expect(mcpMap.slack).toEqual(existingBase);
-    // Prefixed slot was occupied; it gets overwritten by the skill MCP.
-    expect(
-      (mcpMap["sjawhar-slack"] as Record<string, unknown>).command,
-    ).toEqual(["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"]);
-    // A warn-level log should be emitted that mentions both names.
-    const warnCalls = logFn.mock.calls.filter(
-      (call) => (call[0] as { body: { level: string } }).body.level === "warn",
-    );
-    expect(
-      warnCalls.some((c) => {
-        const msg = (c[0] as { body: { message: string } }).body.message ?? "";
-        return msg.includes("slack") && msg.includes("sjawhar-slack");
-      }),
-    ).toBe(true);
+      const mcpMap = config.mcp as Record<string, unknown>;
+      // Base name pre-existing entry stays put.
+      expect(mcpMap.slack).toEqual(existingBase);
+      // Prefixed slot was occupied; it gets overwritten by the skill MCP.
+      expect(
+        (mcpMap["sjawhar-slack"] as Record<string, unknown>).command,
+      ).toEqual(["secrets", "SLACK_MCP_XOXP_TOKEN", "--", "slack-mcp-server"]);
+      // A warn-level log should be emitted that mentions both names.
+      const warnCalls = logEntries(logFn).filter(
+        (entry) => entry.body.level === "warn",
+      );
+      expect(
+        warnCalls.some((entry) => {
+          const msg = entry.body.message ?? "";
+          return msg.includes("slack") && msg.includes("sjawhar-slack");
+        }),
+      ).toBe(true);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("dual registration (skill + command surfaces)", () => {
+  test("default skill registers in config.command AND pushes a cache path", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar }],
+        cacheRoot,
+      });
+
+      const cmd = (config.command as Record<string, unknown>)["public-thing"];
+      expect(cmd).toBeDefined();
+
+      const skills = (config.skills as { paths?: string[] }) ?? {};
+      // No namespace on this source, so the bridge derives a hash key.
+      expect(skills.paths).toContain(
+        path.join(cacheRoot, computeSourceKey(sjawhar)),
+      );
+      const skillPath = skills.paths?.[0];
+      expect(skillPath).toBeDefined();
+      expect(
+        existsSync(path.join(skillPath as string, "public-thing", "SKILL.md")),
+      ).toBe(true);
+
+      // No permission.skill writes anymore.
+      expect((config.permission as { skill?: unknown })?.skill).toBeUndefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("disable-model-invocation: true → command yes, skill no", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+        cacheRoot,
+      });
+
+      // Command IS present (preserves /name).
+      expect(
+        (config.command as Record<string, unknown>)["hidden-thing"],
+      ).toBeDefined();
+      // Skill file is NOT materialized.
+      expect(
+        existsSync(path.join(cacheRoot, "sjawhar", "hidden-thing", "SKILL.md")),
+      ).toBe(false);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("user-invocable: false → skill yes, command no", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+        cacheRoot,
+      });
+
+      expect(
+        (config.command as Record<string, unknown>)["user-only"],
+      ).toBeUndefined();
+      expect(
+        existsSync(path.join(cacheRoot, "sjawhar", "user-only", "SKILL.md")),
+      ).toBe(true);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("both flags set → neither surface", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      const config = await runBridge({
+        sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+        cacheRoot,
+      });
+      // Not in commands.
+      expect(
+        (config.command as Record<string, unknown>)["double-blocked"],
+      ).toBeUndefined();
+      // Not in cache.
+      expect(
+        existsSync(
+          path.join(cacheRoot, "sjawhar", "double-blocked", "SKILL.md"),
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("prunes stale cache entries on subsequent runs with reduced sources", async () => {
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
+    try {
+      // First run: materializes everything.
+      await runBridge({
+        sources: [{ dir: sjawhar, namespace: "sjawhar" }],
+        cacheRoot,
+      });
+      expect(
+        existsSync(path.join(cacheRoot, "sjawhar", "public-thing", "SKILL.md")),
+      ).toBe(true);
+
+      // Second run: empty sources → prune everything.
+      await runBridge({ sources: [], cacheRoot });
+      expect(existsSync(path.join(cacheRoot, "sjawhar"))).toBe(false);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 });

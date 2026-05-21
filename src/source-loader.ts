@@ -1,13 +1,14 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import path, { join } from "node:path";
 import { translateAgentFile } from "./agent-translator";
+import { computeSourceKey, getCacheRoot } from "./cache-paths";
 import { translateCommandFile } from "./command-translator";
 import { expandPluginRoot } from "./expand-plugin-root";
-
 import type { Logger } from "./logger";
 import type { TranslatedMcp } from "./mcp-translator";
 import { loadRootMcp } from "./root-mcp-loader";
-import { translateSkillFile } from "./skill-translator";
+import { materializeSkill } from "./skill-materializer";
+import { type TranslatedSkill, translateSkillFile } from "./skill-translator";
 
 export interface ClaudeBridgeSource {
   dir: string;
@@ -17,11 +18,19 @@ export interface ClaudeBridgeSource {
   namespace?: string;
 }
 
+export interface LoadSourceOptions {
+  /** Override cache root (used by tests). Defaults to `getCacheRoot()`. */
+  cacheRoot?: string;
+}
+
 export interface LoadedSource {
   agents: Record<string, unknown>;
+  /** Merged: standalone commands + skill-derived commands (for user-invocable skills). */
   commands: Record<string, unknown>;
-  skillCommands: Record<string, unknown>;
-  deniedSkills: string[];
+  /** Per-source push paths fed into `config.skills.paths`. One entry per source (or none if no skills materialized). */
+  skillCachePushPaths: string[];
+  /** Absolute paths of materialized SKILL.md files. Used for stale-cache pruning. */
+  materializedSkillPaths: string[];
   skillMcps: Record<string, TranslatedMcp>;
 }
 
@@ -38,72 +47,153 @@ function listMarkdown(dir: string): string[] {
     .map((e) => join(dir, e.name));
 }
 
+function buildCommandTemplate(body: string): string {
+  return (
+    "<command-instruction>\n" +
+    body.trim() +
+    "\n</command-instruction>\n\n" +
+    "<user-request>\n$ARGUMENTS\n</user-request>"
+  );
+}
+
 interface SkillsScanResult {
-  skillCommands: Record<string, unknown>;
-  denied: string[];
-  mcps: Record<string, TranslatedMcp>;
+  commands: Record<string, unknown>;
+  skillMcps: Record<string, TranslatedMcp>;
+  pushPaths: string[];
+  materializedPaths: string[];
 }
 
 async function scanSkills(
   dir: string,
+  sourceDir: string,
+  sourceKey: string,
+  cacheRoot: string,
   logger: Logger,
 ): Promise<SkillsScanResult> {
-  if (!existsSync(dir)) return { skillCommands: {}, denied: [], mcps: {} };
-  const skillCommands: Record<string, unknown> = {};
-  const denied: string[] = [];
-  const mcps: Record<string, TranslatedMcp> = {};
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
+  const empty: SkillsScanResult = {
+    commands: {},
+    skillMcps: {},
+    pushPaths: [],
+    materializedPaths: [],
+  };
+  if (!existsSync(dir)) return empty;
+
+  const commands: Record<string, unknown> = {};
+  const skillMcps: Record<string, TranslatedMcp> = {};
+  const materializedPaths: string[] = [];
+  let pushPath: string | undefined;
+
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const skillPath = join(dir, entry.name, "SKILL.md");
     if (!existsSync(skillPath)) continue;
+
+    let skill: TranslatedSkill | null;
     try {
-      const translated = await translateSkillFile(skillPath, logger);
-      if (translated) {
-        if (skillCommands[translated.baseName]) {
-          await logger.warn(
-            `Duplicate skill name within source: ${translated.baseName}`,
-          );
-        }
-        skillCommands[translated.baseName] = translated.config;
-        if (translated.disabled) {
-          denied.push(translated.baseName);
-        }
-        for (const [mcpName, mcpConfig] of Object.entries(translated.mcps)) {
-          if (mcps[mcpName]) {
-            await logger.warn(
-              `Duplicate MCP server name "${mcpName}" within source (from skill "${translated.baseName}")`,
-            );
-          }
-          mcps[mcpName] = mcpConfig;
-        }
-      }
+      skill = await translateSkillFile(skillPath, logger);
     } catch (err) {
       await logger.warn(
         `Failed to translate skill at ${skillPath}; skipping.`,
-        { error: String(err) },
+        {
+          error: String(err),
+        },
       );
+      continue;
+    }
+    if (!skill) continue;
+
+    // MCPs: aggregate, dedupe with a warning.
+    for (const [mcpName, mcpCfg] of Object.entries(skill.mcps)) {
+      if (skillMcps[mcpName]) {
+        await logger.warn(
+          `Duplicate MCP server name "${mcpName}" within source (from skill "${skill.name}")`,
+        );
+      }
+      skillMcps[mcpName] = mcpCfg;
+    }
+
+    // Skill-side registration (model surface): materialize unless
+    // disable-model-invocation: true.
+    if (!skill.disableModelInvocation) {
+      try {
+        const result = await materializeSkill(
+          {
+            cacheRoot,
+            sourceKey,
+            pluginRoot: sourceDir,
+            skillName: skill.name,
+            description: skill.description,
+            body: skill.body,
+            extraFrontmatter: skill.extraFrontmatter,
+          },
+          logger,
+        );
+        if (result) {
+          pushPath = result.sourcePushPath;
+          materializedPaths.push(result.cachedSkillPath);
+        }
+      } catch (err) {
+        await logger.warn(
+          `Failed to materialize skill "${skill.name}" from ${skillPath}; skipping skill registration.`,
+          { error: String(err) },
+        );
+      }
+    }
+
+    // Command-side registration (user surface): build a templated command
+    // unless user-invocable: false.
+    if (skill.userInvocable) {
+      if (commands[skill.name]) {
+        await logger.warn(`Duplicate skill name within source: ${skill.name}`);
+      }
+      const cmd: Record<string, unknown> = {
+        template: buildCommandTemplate(skill.body),
+      };
+      if (skill.description !== undefined) cmd.description = skill.description;
+      if (skill.commandFields.agent !== undefined) {
+        cmd.agent = skill.commandFields.agent;
+      }
+      if (skill.commandFields.model !== undefined) {
+        cmd.model = skill.commandFields.model;
+      }
+      if (skill.commandFields.subtask !== undefined) {
+        cmd.subtask = skill.commandFields.subtask;
+      }
+      commands[skill.name] = cmd;
     }
   }
-  return { skillCommands, denied, mcps };
+
+  return {
+    commands,
+    skillMcps,
+    pushPaths: pushPath ? [pushPath] : [],
+    materializedPaths,
+  };
 }
 
 export async function loadSource(
   source: ClaudeBridgeSource,
   logger: Logger,
+  opts: LoadSourceOptions = {},
 ): Promise<LoadedSource> {
+  const normalizedDir = path.resolve(source.dir);
+  const normalizedSource: ClaudeBridgeSource = {
+    ...source,
+    dir: normalizedDir,
+  };
   const agents: Record<string, unknown> = {};
   const commands: Record<string, unknown> = {};
 
-  const agentsSubdir = source.agents === undefined ? "agents" : source.agents;
+  const agentsSubdir =
+    normalizedSource.agents === undefined ? "agents" : normalizedSource.agents;
   if (agentsSubdir !== false) {
-    const dir = join(source.dir, agentsSubdir);
+    const dir = join(normalizedSource.dir, agentsSubdir);
     for (const filePath of listMarkdown(dir)) {
       const translated = await translateAgentFile(filePath, logger);
       if (translated) {
         if (agents[translated.baseName]) {
           await logger.warn(
-            `Duplicate agent name within source ${source.dir}: ${translated.baseName}`,
+            `Duplicate agent name within source ${normalizedSource.dir}: ${translated.baseName}`,
           );
         }
         agents[translated.baseName] = translated.config;
@@ -112,15 +202,17 @@ export async function loadSource(
   }
 
   const commandsSubdir =
-    source.commands === undefined ? "commands" : source.commands;
+    normalizedSource.commands === undefined
+      ? "commands"
+      : normalizedSource.commands;
   if (commandsSubdir !== false) {
-    const dir = join(source.dir, commandsSubdir);
+    const dir = join(normalizedSource.dir, commandsSubdir);
     for (const filePath of listMarkdown(dir)) {
       const translated = await translateCommandFile(filePath, logger);
       if (translated) {
         if (commands[translated.baseName]) {
           await logger.warn(
-            `Duplicate command name within source ${source.dir}: ${translated.baseName}`,
+            `Duplicate command name within source ${normalizedSource.dir}: ${translated.baseName}`,
           );
         }
         commands[translated.baseName] = translated.config;
@@ -128,36 +220,58 @@ export async function loadSource(
     }
   }
 
-  const skillsSubdir = source.skills === undefined ? "skills" : source.skills;
-  let skillCommands: Record<string, unknown> = {};
-  let deniedSkills: string[] = [];
+  const skillsSubdir =
+    normalizedSource.skills === undefined ? "skills" : normalizedSource.skills;
+  let skillCachePushPaths: string[] = [];
+  let materializedSkillPaths: string[] = [];
   let skillMcps: Record<string, TranslatedMcp> = {};
   if (skillsSubdir !== false) {
-    const dir = join(source.dir, skillsSubdir);
-    const result = await scanSkills(dir, logger);
-    skillCommands = result.skillCommands;
-    deniedSkills = result.denied;
-    skillMcps = result.mcps;
+    const dir = join(normalizedSource.dir, skillsSubdir);
+    const sourceKey = computeSourceKey(
+      normalizedSource.dir,
+      normalizedSource.namespace,
+    );
+    const cacheRoot = opts.cacheRoot ?? getCacheRoot();
+    const result = await scanSkills(
+      dir,
+      normalizedSource.dir,
+      sourceKey,
+      cacheRoot,
+      logger,
+    );
+    // Merge skill-derived commands into the source-level commands map.
+    // Standalone commands (from <dir>/commands/) take precedence; skill-derived
+    // commands of the same name are skipped with a warning.
+    for (const [k, v] of Object.entries(result.commands)) {
+      if (commands[k]) {
+        await logger.warn(
+          `Duplicate command name within source ${normalizedSource.dir}: "${k}" already provided by commands/; skipping skill-derived command from the same source.`,
+        );
+        continue;
+      }
+      commands[k] = v;
+    }
+    skillMcps = result.skillMcps;
+    skillCachePushPaths = result.pushPaths;
+    materializedSkillPaths = result.materializedPaths;
   }
 
-  // Load any root-level .mcp.json (plugins that ship MCP servers directly).
-  const rootMcps = await loadRootMcp(source.dir, logger);
+  // Root-level .mcp.json (plugins that ship MCP servers at the root).
+  const rootMcps = await loadRootMcp(normalizedSource.dir, logger);
   for (const [name, cfg] of Object.entries(rootMcps)) {
     if (skillMcps[name]) {
       await logger.warn(
-        `Duplicate MCP server name "${name}" in source ${source.dir} (root .mcp.json vs skill-embedded)`,
+        `Duplicate MCP server name "${name}" in source ${normalizedSource.dir} (root .mcp.json vs skill-embedded)`,
       );
     }
     skillMcps[name] = cfg;
   }
 
-  // Expand ${CLAUDE_PLUGIN_ROOT} tokens throughout translated output so the
-  // values shown to OpenCode (and ultimately the LLM and shell) are concrete paths.
   return {
-    agents: expandMap(agents, source.dir),
-    commands: expandMap(commands, source.dir),
-    skillCommands: expandMap(skillCommands, source.dir),
-    deniedSkills,
-    skillMcps: expandMap(skillMcps, source.dir),
+    agents: expandMap(agents, normalizedSource.dir),
+    commands: expandMap(commands, normalizedSource.dir),
+    skillCachePushPaths,
+    materializedSkillPaths,
+    skillMcps: expandMap(skillMcps, normalizedSource.dir),
   };
 }

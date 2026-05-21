@@ -37,10 +37,10 @@ describe("non-string scalar frontmatter values", () => {
   test("skill translator coerces numeric scalars instead of crashing", async () => {
     const fixture = path.join(fixturesRoot, "skills/numeric-fields/SKILL.md");
     const result = await translateSkillFile(fixture, logger);
-    expect(result?.baseName).toBe("1234");
-    expect(result?.config.description).toBe("42");
-    expect(result?.config.agent).toBe("7");
-    expect(result?.config.model).toBeUndefined();
+    expect(result?.name).toBe("1234");
+    expect(result?.description).toBe("42");
+    expect(result?.commandFields.agent).toBe("7");
+    expect(result?.commandFields.model).toBeUndefined();
     expect(result?.mcps).toEqual({});
   });
 });
