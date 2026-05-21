@@ -5,13 +5,13 @@
 **Commit:** `ce2ce45c` (main)
 
 ## OVERVIEW
-OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/` (.md + YAML frontmatter) into entries on OpenCode `config.agent`, `config.command`, `config.mcp`, and `config.permission.skill` via the plugin `config` hook. ~824 LOC TypeScript, runs on Bun, single npm package (no monorepo).
+OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/` (.md + YAML frontmatter) into entries on OpenCode `config.agent`, `config.command`, `config.mcp`, and `config.skills.paths` via the plugin `config` hook. Skills dual-register (skill + command surfaces); per-skill suppression via Claude Code's official `disable-model-invocation` and `user-invocable` fields. Materialization cache lives under `$XDG_CACHE_HOME/opencode-claude-bridge/skills/`. Runs on Bun, single npm package (no monorepo).
 
 ## STRUCTURE
 ```
 .
-├── src/                 # 13 flat .ts modules — NO subdirs, NO barrel files
-├── test/                # 13 *.test.ts (1:1 with src/) + integration.test.ts
+├── src/                 # 18 flat .ts modules — NO subdirs, NO barrel files
+├── test/                # *.test.ts (1:1 with src/) + integration.test.ts + integration.claude-plugins.test.ts
 │   └── fixtures/        # sjawhar/ (real layout), yaml-quirks/ (regressions), empty/
 ├── .github/workflows/   # ci.yml (lint+typecheck+test+build, parallel) + publish.yml
 ├── biome.json           # lint+format (NOT eslint/prettier)
@@ -26,7 +26,9 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 | Per-source orchestration | `src/source-loader.ts` → `loadSource`, `scanSkills` |
 | Agent `.md` → config | `src/agent-translator.ts` |
 | Command `.md` → config | `src/command-translator.ts` |
-| Skill `SKILL.md` → command + permission + MCP | `src/skill-translator.ts` |
+| Skill `SKILL.md` → structured `TranslatedSkill` (body + flags + MCP + command fields) | `src/skill-translator.ts` |
+| Materialize SKILL.md to bridge cache (write + prune) | `src/skill-materializer.ts` → `materializeSkill`, `pruneStaleCache` |
+| XDG cache root + per-source key derivation | `src/cache-paths.ts` → `getCacheRoot`, `computeSourceKey` |
 | YAML `mcp:` block → `config.mcp` (local + remote) | `src/mcp-translator.ts` |
 | YAML frontmatter splitter | `src/frontmatter.ts` (uses `yaml` package) |
 | Claude model alias map (`opus`/`sonnet`/`haiku`) | `src/model-mapper.ts` |
@@ -35,7 +37,8 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 | Color validation (hex + theme set) | `src/color-mapper.ts` |
 | Path rewrite `~/.claude/` → `~/.config/opencode/` | `src/rewrite-paths.ts` |
 | Logger (OpenCode client OR console fallback) | `src/logger.ts` |
-| Collision + permission + namespace integration tests | `test/integration.test.ts` |
+| Collision + dual-registration + namespace integration tests | `test/integration.test.ts` |
+| Dual-registration + cache integration tests | `test/integration.test.ts` (also covers `config.skills.paths` pushes and prune) |
 | YAML scalar quirks regression tests | `test/yaml-quirks.test.ts` |
 
 ## CODE MAP
@@ -47,7 +50,13 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 | `scanSkills` | fn | `src/source-loader.ts:39` | Per-skill subdirectory scanner (each skill is `<dir>/<name>/SKILL.md`) |
 | `translateAgentFile` | fn | `src/agent-translator.ts:32` | Returns `null` on failure; logs `warn` |
 | `translateCommandFile` | fn | `src/command-translator.ts:30` | Wraps body in `<command-instruction>` template |
-| `translateSkillFile` | fn | `src/skill-translator.ts:32` | Returns `{ baseName, disabled, config, mcps }` — triple output |
+| `translateSkillFile` | fn | `src/skill-translator.ts` | Returns `TranslatedSkill { name, description?, body, disableModelInvocation, userInvocable, extraFrontmatter, mcps, commandFields }` |
+| `materializeSkill` | fn | `src/skill-materializer.ts` | Writes a normalized SKILL.md to the bridge cache, idempotent via content-hash compare |
+| `pruneStaleCache` | fn | `src/skill-materializer.ts` | Removes cache entries not in the live manifest; called once per `config` hook run |
+| `getCacheRoot` | fn | `src/cache-paths.ts` | Resolves `$XDG_CACHE_HOME/opencode-claude-bridge/skills` (default `~/.cache/...`) |
+| `computeSourceKey` | fn | `src/cache-paths.ts` | Namespace if provided, else 12-char SHA-256 of absolute source dir |
+| `TranslatedSkill` | type | `src/skill-translator.ts` | Structured skill |
+| `SkillToMaterialize` | iface | `src/skill-materializer.ts` | Input to `materializeSkill`: cache root + source identity + skill payload |
 | `translateMcpBlock` | fn | `src/mcp-translator.ts:121` | Validates each server; skips malformed with `warn` |
 | `parseFrontmatter<T>` | fn | `src/frontmatter.ts:10` | Returns `{ data: T, body: string }`; tolerant of malformed YAML |
 | `mapClaudeModel` | fn | `src/model-mapper.ts:9` | `"inherit"` → undefined; aliases → `anthropic/...` |
@@ -67,8 +76,9 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 - **Translators never throw** — they `return null` and log `warn`. The pipeline relies on graceful skip semantics; throwing breaks `loadSource`.
 - **Logger is async + injected**, never global. `Logger` methods return `Promise<void>` — `await` them. Falls back to `console` when `client` is `undefined` (tests).
 - **Collision separator**: `/` for agents and commands, `-` for MCPs. The `-` is mandatory for MCPs because Anthropic tool names must match `^[a-zA-Z0-9_-]{1,128}$`.
-- **Body wrapping** for commands and skills is exactly `<command-instruction>\n…\n</command-instruction>\n\n<user-request>\n$ARGUMENTS\n</user-request>` (`command-translator.ts:49`, `skill-translator.ts:55`). Change both call sites together.
+- **Body wrapping** for commands and skills is exactly `<command-instruction>\n…\n</command-instruction>\n\n<user-request>\n$ARGUMENTS\n</user-request>` (`command-translator.ts` and `source-loader.ts` `buildCommandTemplate`). Change both call sites together.
 - **JJ, not git**: this user uses Jujutsu. NEVER `git commit` / `git push`. Use `jj describe`, `jj new`, `jj git push`. See workspace `AGENTS.md`/`CLAUDE.md` overrides.
+- **Cache directory**: `$XDG_CACHE_HOME/opencode-claude-bridge/skills/<source-key>/<skill-name>/SKILL.md` is bridge-owned. Created on demand, idempotent (content-hash compare on rewrite), pruned each `config` hook run. Do NOT commit cache contents to the repo. Tests pass `cacheRoot: mkdtempSync(...)` for hermeticity (see `test/integration.test.ts` inline pattern and `test/source-loader.test.ts` `beforeEach`/`afterEach` pattern).
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - DO NOT add `as any` or `@ts-ignore` — strict mode is enforced. Use `unknown` + type guards (see `isPlainObject`, `toStringArray`, `toStringMap` in `mcp-translator.ts`).
@@ -79,10 +89,12 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 - DO NOT pass `argument-hint` through to OpenCode `config.command` — its schema rejects the field. The bridge intentionally drops it.
 - DO NOT manually bump `package.json` version — `publish.yml` derives version from conventional commits and rewrites it.
 - DO NOT publish `provenance` (`NPM_CONFIG_PROVENANCE: false` in `publish.yml`) — explicit choice; don't enable.
+- DO NOT write to `config.permission.skill` from the bridge's default code paths — issue #5 explicitly removed that behavior. Cross-source permission policy is the user's responsibility.
+- DO NOT call `loadSource` or `createClaudeBridge` from a test without passing `cacheRoot` — the bridge falls back to `getCacheRoot()` (the real XDG path) and pollutes the user's home dir during the test run.
 
 ## UNIQUE STYLES
 - **Path rewrite is destructive global replace** (`src/rewrite-paths.ts`): applies to agent prompts and command/skill template bodies. Skill bodies passed to OpenCode native skill discovery are NOT rewritten — only the body that becomes the slash-command template is.
-- **Skill is triple-purpose**: one `SKILL.md` becomes (a) entry in `config.command`, (b) optional `config.permission.skill[name] = "deny"` if `disable-model-invocation: true`, and (c) zero-or-more `config.mcp[serverName]` entries from frontmatter `mcp:` block. All three flow out of `translateSkillFile` in one pass.
+- **Skill is dual-surface**: one `SKILL.md` becomes (a) a materialized entry under `config.skills.paths` (model surface, suppressed by `disable-model-invocation: true`) and (b) a `config.command[<name>]` entry with the historic `<command-instruction>` template (user surface, suppressed by `user-invocable: false`). Plus (c) zero-or-more `config.mcp[<server>]` entries from the frontmatter `mcp:` block. The two CC fields are independent toggles — both, either, or neither surface can be active per skill.
 - **Local MCP `command` is normalized to a single `string[]`** by concatenating `command + args` (`mcp-translator.ts:113`). Both shapes work in input: string `command` + array `args`, OR array `command` with no `args`.
 - **Agent `mode` defaults to `"subagent"`**. Only `"primary"` agents get `model` populated (`agent-translator.ts:60`).
 - `model: "inherit"` is dropped (returns `undefined`) — OpenCode handles inheritance natively.

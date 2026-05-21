@@ -28,7 +28,7 @@ export const MyBridge = createClaudeBridge({
 });
 ```
 
-Each source is scanned for `<dir>/agents/*.md`, `<dir>/commands/*.md`, and `<dir>/skills/*/SKILL.md`. Skills are registered as slash-commands, have their `disable-model-invocation: true` flag respected (see below), and have their `mcp:` frontmatter block translated into OpenCode `config.mcp` entries.
+Each source is scanned for `<dir>/agents/*.md`, `<dir>/commands/*.md`, and `<dir>/skills/*/SKILL.md`. Skills register **dually**: as opencode skills (via `config.skills.paths`) and as slash-commands (via `config.command`), so the model sees them in `<available_skills>` and users can still type `/<name>`. Per-skill surface control follows the official Claude Code frontmatter — `disable-model-invocation: true` suppresses skill registration (model can't see it; user can still `/<name>`); `user-invocable: false` suppresses command registration (model can see it; not in the `/` menu). The `mcp:` block is still translated into `config.mcp` entries regardless of which surface(s) the skill registers on.
 
 ### Source options
 
@@ -37,8 +37,30 @@ Each source is scanned for `<dir>/agents/*.md`, `<dir>/commands/*.md`, and `<dir
 | `dir` | `string` | — (required) | Path to a directory with Claude-format `agents/` and/or `commands/` subdirs |
 | `agents` | `string \| false` | `"agents"` | Subdir to scan for agent `.md` files; `false` to skip |
 | `commands` | `string \| false` | `"commands"` | Subdir to scan for command `.md` files; `false` to skip |
-| `skills` | `string \| false` | `"skills"` | Subdir to scan for skill `SKILL.md` files (registered as commands, with `mcp:` blocks extracted and `disable-model-invocation: true` enforced as `deny` permissions); `false` to skip |
+| `skills` | `string \| false` | `"skills"` | Subdir to scan for skill `SKILL.md` files. Each skill registers as an opencode skill (materialized into the bridge cache, then pushed via `config.skills.paths`) AND as a slash-command (in `config.command`), unless suppressed by `disable-model-invocation: true` or `user-invocable: false` frontmatter. `mcp:` blocks are extracted into `config.mcp`. Pass `false` to skip skill scanning entirely. |
 | `namespace` | `string` | — | Used as a fallback prefix on name collisions — see [Collision handling](#collision-handling) |
+
+## Skill cache
+
+The bridge writes a normalized `SKILL.md` for every model-visible skill into a bridge-owned cache, defaulting to `$XDG_CACHE_HOME/opencode-claude-bridge/skills/<source-key>/<skill-name>/SKILL.md` (`~/.cache/opencode-claude-bridge/skills/...` when XDG is unset). Opencode discovers these via `config.skills.paths`.
+
+The materialization step:
+
+- Synthesizes the frontmatter `name` from the parent directory when omitted (opencode requires `name` in frontmatter or skips the skill — the bridge fills it in).
+- Expands `${CLAUDE_PLUGIN_ROOT}` tokens in the body to the original source dir, so links and shell args inside the skill body resolve correctly.
+- Is idempotent — only rewrites a cached `SKILL.md` when its content changes (content-hash compare, no mtime games).
+- Prunes stale entries on each `config` hook run: removing a source (or uninstalling a marketplace plugin) cleans itself up.
+
+Override the cache root with `cacheRoot` on `createClaudeBridge`:
+
+```ts
+createClaudeBridge({
+  sources: [...],
+  cacheRoot: "/custom/cache/path",
+});
+```
+
+Tests use this to point at a tmpdir. Users almost never need to override it.
 
 ## Claude Code marketplace plugin discovery
 
@@ -142,24 +164,21 @@ This loader runs on **every** source, not just discovered ones. Hand-listed sour
 | `handoffs` | `handoffs` | pass through |
 | `argument-hint` | — | dropped (OpenCode `config.command` schema rejects it) |
 
-## Skill permissions (disable-model-invocation)
+## Model-invocation suppression (`disable-model-invocation`)
 
-Claude's `disable-model-invocation: true` frontmatter field hides a skill from the model's auto-discovery but keeps it user-invocable via slash command. OpenCode doesn't natively honor this field — skills with it are fully auto-invocable by the model.
+Claude Code's `disable-model-invocation: true` frontmatter field hides a skill from the model's auto-discovery but keeps it user-invocable. The bridge honors this by **not materializing the skill into the cache** — the skill never reaches `config.skills.paths`, so opencode's model-side discovery doesn't see it. The slash-command registration (`config.command[<name>]`) still happens, so `/<name>` continues to work for explicit user invocation.
 
-This bridge bridges the gap: for each SKILL.md with `disable-model-invocation: true` in a source's `skills/` subdir, it adds `config.permission.skill[<name>] = "deny"`. Result: the model can't see or invoke the skill, but the user can still run it via `/<name>`.
+### Behavior change (v0.5+)
 
-Source option to skip skill scanning:
+Previously the bridge wrote `config.permission.skill[<name>] = "deny"` whenever a skill had `disable-model-invocation: true`. That write is now removed. Suppression happens via the path-push mechanism — the bridge simply doesn't materialize/push skills with `disable-model-invocation: true`, so opencode never sees them via the bridge.
 
-```ts
-createBridge({
-  sources: [
-    { dir: "/path", skills: false },  // don't scan skills at all
-    { dir: "/other", skills: "my-skills" },  // custom subdir name
-  ],
-});
-```
+If you need belt-and-suspenders coverage against opencode's other native discovery paths (`~/.claude/skills/<name>/`, `.agents/skills/<name>/`, etc.), set `config.permission.skill[<name>] = "deny"` yourself in your opencode config — the bridge no longer does this for you.
 
-If a skill already has a different permission set in `config.permission.skill[<name>]`, the bridge will overwrite it with `"deny"` and log a warning.
+## User-invocable suppression (`user-invocable`)
+
+Claude Code's `user-invocable: false` frontmatter field hides a skill from the `/` menu while keeping it model-invocable. The bridge honors this by skipping the slash-command registration: the model sees the skill (via `config.skills.paths`) but the `/` menu doesn't list it.
+
+Setting both `disable-model-invocation: true` AND `user-invocable: false` removes the skill from both surfaces.
 
 ## Skill MCP servers (frontmatter `mcp:` block)
 
@@ -207,14 +226,15 @@ If a server name already exists in `config.mcp` (e.g. user-defined in `opencode.
 
 ## Skills (native OpenCode discovery)
 
-Beyond permissions and MCPs, skill bodies are left to OpenCode's native discovery. OpenCode scans:
+Beyond MCPs and the bridge cache, skill bodies are left to OpenCode's native discovery. OpenCode scans:
 
 - `.opencode/skills/<name>/SKILL.md` (project-local OpenCode)
 - `~/.config/opencode/skills/<name>/SKILL.md` (global OpenCode)
 - `.claude/skills/<name>/SKILL.md` (project-local Claude compat)
 - `~/.claude/skills/<name>/SKILL.md` (global Claude compat)
+- Any path you push into `config.skills.paths` (this is what the bridge uses — see [Skill cache](#skill-cache) above).
 
-If you want OpenCode to see skills from an arbitrary directory, symlink them into one of the paths above (e.g. `ln -sfn /my/skills ~/.claude/skills/my-set`).
+If you want OpenCode to see skills from an arbitrary directory, either symlink them into one of the paths above OR feed them through the bridge (which materializes them into the bridge cache and pushes the cache path).
 
 ## Collision handling
 
@@ -224,7 +244,7 @@ When a source produces a name that already exists in the target map (`config.age
 
 Runtime messages go to OpenCode's log via `client.app.log({ body: { service: "opencode-claude-bridge", level, message, extra? } })`. Levels used:
 
-- `warn` — collision overwrites, duplicate names within a source, malformed `mcp:` shapes, file read or skill translation failures, overriding existing skill permissions
+- `warn` — collision overwrites, duplicate names within a source, malformed `mcp:` shapes, file read or skill translation failures
 - `info` — collision fallbacks (registering under the namespaced name)
 - `debug` — dropped unrecognized fields (e.g. invalid color names)
 
