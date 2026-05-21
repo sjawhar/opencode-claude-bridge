@@ -1,4 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createClaudeBridge } from "../src/index";
 import { copyClaudeHomeFixtureWithRealPaths } from "./helpers/claude-fixtures";
@@ -29,18 +31,31 @@ describe("createClaudeBridge with claudePlugins discovery", () => {
     const claudeHome = copyClaudeHomeFixtureWithRealPaths(
       path.join(DISC, "claude-home"),
     );
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-plug-"));
 
-    const cfg = await runBridge({
-      sources: [],
-      claudePlugins: {
-        claudeConfigDir: claudeHome,
-        cwd: path.join(DISC, "project-cwd"),
-      },
-    });
+    try {
+      const cfg = await runBridge({
+        sources: [],
+        cacheRoot,
+        claudePlugins: {
+          claudeConfigDir: claudeHome,
+          cwd: path.join(DISC, "project-cwd"),
+        },
+      });
 
-    const commands = cfg.command as Record<string, unknown>;
-    // plugin-skills has skills/example-skill → registered as a command
-    expect(commands["example-skill"]).toBeDefined();
+      const commands = cfg.command as Record<string, unknown>;
+      // plugin-skills has skills/example-skill → registered as a command
+      expect(commands["example-skill"]).toBeDefined();
+      const skillsPaths = (cfg.skills as { paths?: string[] }).paths ?? [];
+      expect(skillsPaths.length).toBeGreaterThan(0);
+      expect(
+        existsSync(
+          path.join(cacheRoot, "plugin-skills", "example-skill", "SKILL.md"),
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("user-listed sources occupy unprefixed slots; discovered ones namespace-fallback on collision", async () => {
@@ -52,28 +67,40 @@ describe("createClaudeBridge with claudePlugins discovery", () => {
       claudeHome,
       "plugins/cache/market-a/plugin-skills/1.0.0",
     );
-    const cfg = await runBridge({
-      sources: [{ dir: handPath, namespace: "hand" }],
-      claudePlugins: {
-        claudeConfigDir: claudeHome,
-        cwd: path.join(DISC, "project-cwd"),
-      },
-    });
-    const commands = cfg.command as Record<string, unknown>;
-    // user-listed: unprefixed
-    expect(commands["example-skill"]).toBeDefined();
-    // discovered: namespaced to plugin-skills/example-skill (collision fallback)
-    expect(commands["plugin-skills/example-skill"]).toBeDefined();
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-plug-"));
+    try {
+      const cfg = await runBridge({
+        sources: [{ dir: handPath, namespace: "hand" }],
+        cacheRoot,
+        claudePlugins: {
+          claudeConfigDir: claudeHome,
+          cwd: path.join(DISC, "project-cwd"),
+        },
+      });
+      const commands = cfg.command as Record<string, unknown>;
+      // user-listed: unprefixed
+      expect(commands["example-skill"]).toBeDefined();
+      // discovered: namespaced to plugin-skills/example-skill (collision fallback)
+      expect(commands["plugin-skills/example-skill"]).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 
   test("claudePlugins: true uses default env-based config dir", async () => {
     // Sanity: with `true`, bridge resolves claudeConfigDir from
     // process.env.CLAUDE_CONFIG_DIR or homedir. Just verify it runs without
     // throwing (discovery may return empty if env doesn't point to anything).
-    const cfg = await runBridge({
-      sources: [],
-      claudePlugins: true,
-    });
-    expect(cfg.command).toBeDefined();
+    const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-plug-"));
+    try {
+      const cfg = await runBridge({
+        sources: [],
+        cacheRoot,
+        claudePlugins: true,
+      });
+      expect(cfg.command).toBeDefined();
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+    }
   });
 });
