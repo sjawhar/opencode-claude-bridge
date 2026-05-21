@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parse as parseYaml } from "yaml";
 import { createLogger } from "../src/logger";
 import {
   materializeSkill,
@@ -106,6 +107,28 @@ describe("materializeSkill", () => {
     const content = readFileSync(result.cachedSkillPath, "utf-8");
     expect(content).toContain("license: MIT");
     expect(content).toMatch(/allowed-tools: ['"]?Read Write['"]?/);
+  });
+
+  test("round-trips nested metadata and compatibility structurally", async () => {
+    const extra = {
+      compatibility: "Requires Python 3.14+ and uv",
+      metadata: {
+        author: "Sami",
+        tags: ["dev", "review"],
+        details: { team: "Trajectory", priority: 1 },
+      },
+    };
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({ cacheRoot: tmp, extraFrontmatter: extra }),
+        logger,
+      ),
+    );
+    const content = readFileSync(result.cachedSkillPath, "utf-8");
+    const fm = content.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+    const parsed = parseYaml(fm) as Record<string, unknown>;
+    expect(parsed.compatibility).toBe(extra.compatibility);
+    expect(parsed.metadata).toEqual(extra.metadata);
   });
 
   test("omits description line when description is undefined", async () => {
