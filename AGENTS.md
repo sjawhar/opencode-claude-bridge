@@ -44,12 +44,12 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 ## CODE MAP
 | Symbol | Kind | Location | Role |
 |--------|------|----------|------|
-| `createClaudeBridge` | fn | `src/index.ts:47` | Public plugin factory (only public export besides `ClaudeBridgeSource`) |
-| `registerWithCollision` | fn | `src/index.ts:13` | Namespace fallback (`/` agents+commands, `-` MCPs) |
-| `loadSource` | fn | `src/source-loader.ts:83` | Walks one source's agents/commands/skills subdirs |
-| `scanSkills` | fn | `src/source-loader.ts:39` | Per-skill subdirectory scanner (each skill is `<dir>/<name>/SKILL.md`) |
-| `translateAgentFile` | fn | `src/agent-translator.ts:32` | Returns `null` on failure; logs `warn` |
-| `translateCommandFile` | fn | `src/command-translator.ts:30` | Wraps body in `<command-instruction>` template |
+| `createClaudeBridge` | fn | `src/index.ts` | Public plugin factory (only public export besides `ClaudeBridgeSource`) |
+| `registerWithCollision` | fn | `src/index.ts` | Namespace fallback (`/` agents+commands, `-` MCPs) |
+| `loadSource` | fn | `src/source-loader.ts` | Walks one source's agents/commands/skills subdirs |
+| `scanSkills` | fn | `src/source-loader.ts` | Per-skill subdirectory scanner (each skill is `<dir>/<name>/SKILL.md`) |
+| `translateAgentFile` | fn | `src/agent-translator.ts` | Returns `null` on failure; logs `warn` |
+| `translateCommandFile` | fn | `src/command-translator.ts` | Wraps body in `<command-instruction>` template |
 | `translateSkillFile` | fn | `src/skill-translator.ts` | Returns `TranslatedSkill { name, description?, body, disableModelInvocation, userInvocable, extraFrontmatter, mcps, commandFields }` |
 | `materializeSkill` | fn | `src/skill-materializer.ts` | Writes a normalized SKILL.md to the bridge cache, idempotent via content-hash compare |
 | `pruneStaleCache` | fn | `src/skill-materializer.ts` | Removes cache entries not in the live manifest; called once per `config` hook run |
@@ -57,16 +57,16 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 | `computeSourceKey` | fn | `src/cache-paths.ts` | Namespace if provided, else 12-char SHA-256 of absolute source dir |
 | `TranslatedSkill` | type | `src/skill-translator.ts` | Structured skill |
 | `SkillToMaterialize` | iface | `src/skill-materializer.ts` | Input to `materializeSkill`: cache root + source identity + skill payload |
-| `translateMcpBlock` | fn | `src/mcp-translator.ts:121` | Validates each server; skips malformed with `warn` |
-| `parseFrontmatter<T>` | fn | `src/frontmatter.ts:10` | Returns `{ data: T, body: string }`; tolerant of malformed YAML |
-| `mapClaudeModel` | fn | `src/model-mapper.ts:9` | `"inherit"` → undefined; aliases → `anthropic/...` |
-| `parseToolsList` | fn | `src/tools-parser.ts:20` | Drops unknown tools at `debug` level |
-| `mapClaudeColor` | fn | `src/color-mapper.ts:12` | Hex `^#[0-9a-fA-F]{3,8}$` OR theme set; else undefined |
-| `asScalarString` | fn | `src/coerce.ts:9` | Stringifies primitives; rejects objects/arrays |
-| `rewriteClaudePaths` | fn | `src/rewrite-paths.ts:1` | Global string replace on agent prompts + command/skill bodies |
-| `createLogger` | fn | `src/logger.ts:14` | Returns async `{debug,info,warn,error}` |
-| `ClaudeBridgeSource` | iface | `src/source-loader.ts:10` | `{ dir, namespace?, agents?, commands?, skills? }` |
-| `TranslatedMcp` | type | `src/mcp-translator.ts:20` | Discriminated union: `local` (command[]) or `remote` (url) |
+| `translateMcpBlock` | fn | `src/mcp-translator.ts` | Validates each server; skips malformed with `warn` |
+| `parseFrontmatter<T>` | fn | `src/frontmatter.ts` | Returns `{ data: T, body: string }`; tolerant of malformed YAML |
+| `mapClaudeModel` | fn | `src/model-mapper.ts` | `"inherit"` → undefined; aliases → `anthropic/...` |
+| `parseToolsList` | fn | `src/tools-parser.ts` | Drops unknown tools at `debug` level |
+| `mapClaudeColor` | fn | `src/color-mapper.ts` | Hex `^#[0-9a-fA-F]{3,8}$` OR theme set; else undefined |
+| `asScalarString` | fn | `src/coerce.ts` | Stringifies primitives; rejects objects/arrays |
+| `rewriteClaudePaths` | fn | `src/rewrite-paths.ts` | Global string replace on agent prompts + command/skill bodies |
+| `createLogger` | fn | `src/logger.ts` | Returns async `{debug,info,warn,error}` |
+| `ClaudeBridgeSource` | iface | `src/source-loader.ts` | `{ dir, namespace?, agents?, commands?, skills? }` |
+| `TranslatedMcp` | type | `src/mcp-translator.ts` | Discriminated union: `local` (command[]) or `remote` (url) |
 
 ## CONVENTIONS
 - **Bun-first**: dev runtime is Bun 1.3.11, tests run via `bun:test`, lockfile is `bun.lock`. CI uses `--frozen-lockfile`. DO NOT add npm/pnpm/yarn scripts.
