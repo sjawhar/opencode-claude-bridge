@@ -48,7 +48,7 @@ The materialization step:
 
 - Synthesizes the frontmatter `name` from the parent directory when omitted (opencode requires `name` in frontmatter or skips the skill — the bridge fills it in).
 - Expands `${CLAUDE_PLUGIN_ROOT}` tokens in the body to the original source dir, so links and shell args inside the skill body resolve correctly.
-- Is idempotent — only rewrites a cached `SKILL.md` when its content changes (content-hash compare, no mtime games).
+- Is idempotent — only rewrites a cached `SKILL.md` when its content changes (content compare, no mtime games).
 - Prunes stale entries on each `config` hook run: removing a source (or uninstalling a marketplace plugin) cleans itself up.
 
 Override the cache root with `cacheRoot` on `createClaudeBridge`:

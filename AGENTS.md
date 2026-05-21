@@ -51,7 +51,7 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 | `translateAgentFile` | fn | `src/agent-translator.ts` | Returns `null` on failure; logs `warn` |
 | `translateCommandFile` | fn | `src/command-translator.ts` | Wraps body in `<command-instruction>` template |
 | `translateSkillFile` | fn | `src/skill-translator.ts` | Returns `TranslatedSkill { name, description?, body, disableModelInvocation, userInvocable, extraFrontmatter, mcps, commandFields }` |
-| `materializeSkill` | fn | `src/skill-materializer.ts` | Writes a normalized SKILL.md to the bridge cache, idempotent via content-hash compare |
+| `materializeSkill` | fn | `src/skill-materializer.ts` | Writes a normalized SKILL.md to the bridge cache, idempotent via content compare |
 | `pruneStaleCache` | fn | `src/skill-materializer.ts` | Removes cache entries not in the live manifest; called once per `config` hook run |
 | `getCacheRoot` | fn | `src/cache-paths.ts` | Resolves `$XDG_CACHE_HOME/opencode-claude-bridge/skills` (default `~/.cache/...`) |
 | `computeSourceKey` | fn | `src/cache-paths.ts` | Namespace if provided, else 12-char SHA-256 of absolute source dir |
@@ -78,7 +78,7 @@ OpenCode plugin that translates Claude Code `agents/`, `commands/`, and `skills/
 - **Collision separator**: `/` for agents and commands, `-` for MCPs. The `-` is mandatory for MCPs because Anthropic tool names must match `^[a-zA-Z0-9_-]{1,128}$`.
 - **Body wrapping** for commands and skills is exactly `<command-instruction>\n…\n</command-instruction>\n\n<user-request>\n$ARGUMENTS\n</user-request>` (`command-translator.ts` and `source-loader.ts` `buildCommandTemplate`). Change both call sites together.
 - **JJ, not git**: this user uses Jujutsu. NEVER `git commit` / `git push`. Use `jj describe`, `jj new`, `jj git push`. See workspace `AGENTS.md`/`CLAUDE.md` overrides.
-- **Cache directory**: `$XDG_CACHE_HOME/opencode-claude-bridge/skills/<source-key>/<skill-name>/SKILL.md` is bridge-owned. Created on demand, idempotent (content-hash compare on rewrite), pruned each `config` hook run. Do NOT commit cache contents to the repo. Tests pass `cacheRoot: mkdtempSync(...)` for hermeticity (see `test/integration.test.ts` inline pattern and `test/source-loader.test.ts` `beforeEach`/`afterEach` pattern).
+- **Cache directory**: `$XDG_CACHE_HOME/opencode-claude-bridge/skills/<source-key>/<skill-name>/SKILL.md` is bridge-owned. Created on demand, idempotent (content compare on rewrite), pruned each `config` hook run. Do NOT commit cache contents to the repo. Tests pass `cacheRoot: mkdtempSync(...)` for hermeticity (see `test/integration.test.ts` inline pattern and `test/source-loader.test.ts` `beforeEach`/`afterEach` pattern).
 
 ## ANTI-PATTERNS (THIS PROJECT)
 - DO NOT add `as any` or `@ts-ignore` — strict mode is enforced. Use `unknown` + type guards (see `isPlainObject`, `toStringArray`, `toStringMap` in `mcp-translator.ts`).

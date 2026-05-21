@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,7 @@ import { loadSource } from "../src/source-loader";
 const logger = createLogger(undefined);
 const sjawhar = path.join(import.meta.dir, "fixtures/sjawhar");
 const empty = path.join(import.meta.dir, "fixtures/empty");
+const pluginRootToken = "$" + "{CLAUDE_PLUGIN_ROOT}";
 
 let cacheRoot: string;
 
@@ -118,6 +120,63 @@ describe("loadSource", () => {
     expect(cmd.template).toContain("Body for public-thing.");
     expect(cmd.template).toContain("<user-request>");
     expect(cmd.template).toContain("$ARGUMENTS");
+  });
+
+  test("standalone commands take precedence over same-named skill commands", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "ocb-precedence-"));
+    try {
+      mkdirSync(path.join(dir, "commands"), { recursive: true });
+      mkdirSync(path.join(dir, "skills", "same-name"), { recursive: true });
+      writeFileSync(
+        path.join(dir, "commands", "same-name.md"),
+        "---\ndescription: Standalone command\n---\n\nStandalone body.",
+      );
+      writeFileSync(
+        path.join(dir, "skills", "same-name", "SKILL.md"),
+        "---\nname: same-name\ndescription: Skill command\ndisable-model-invocation: true\n---\n\nSkill body.",
+      );
+
+      const result = await loadSource({ dir }, logger, { cacheRoot });
+      const cmd = result.commands["same-name"] as {
+        description?: string;
+        template: string;
+      };
+      expect(cmd.description).toBe("Standalone command");
+      expect(cmd.template).toContain("Standalone body.");
+      expect(cmd.template).not.toContain("Skill body.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("normalizes source.dir before source-key derivation and plugin-root expansion", async () => {
+    const parent = mkdtempSync(path.join(os.tmpdir(), "ocb-normalize-"));
+    try {
+      const dir = path.join(parent, "source");
+      mkdirSync(path.join(dir, "skills", "token-skill"), { recursive: true });
+      writeFileSync(
+        path.join(dir, "skills", "token-skill", "SKILL.md"),
+        `---\nname: token-skill\n---\n\nRun ${pluginRootToken}/bin/helper.sh`,
+      );
+
+      const relativeDir = path.relative(process.cwd(), dir);
+      const result = await loadSource({ dir: relativeDir }, logger, {
+        cacheRoot,
+      });
+      const absoluteDir = path.resolve(relativeDir);
+      const expectedSourceKey = path.basename(result.skillCachePushPaths[0]);
+      const second = await loadSource({ dir: absoluteDir }, logger, {
+        cacheRoot,
+      });
+      expect(path.basename(second.skillCachePushPaths[0])).toBe(
+        expectedSourceKey,
+      );
+      const cached = readFileSync(result.materializedSkillPaths[0], "utf-8");
+      expect(cached).toContain(`Run ${absoluteDir}/bin/helper.sh`);
+      expect(cached).not.toContain(pluginRootToken);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   test("hidden-thing still gets a command entry (disable-model-invocation preserves /name)", async () => {

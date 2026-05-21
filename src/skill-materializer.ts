@@ -1,9 +1,12 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -79,6 +82,19 @@ export async function materializeSkill(
     return null;
   }
 
+  try {
+    const lst = lstatSync(cachedSkillPath);
+    if (lst.isSymbolicLink()) {
+      unlinkSync(cachedSkillPath);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      await logger.warn(`Could not lstat cached skill ${cachedSkillPath}`, {
+        error: String(err),
+      });
+    }
+  }
+
   const next = buildContent(skill);
   let prev: string | undefined;
   if (existsSync(cachedSkillPath)) {
@@ -104,7 +120,9 @@ export async function materializeSkill(
       );
     }
     mkdirSync(skillDir, { recursive: true });
-    writeFileSync(cachedSkillPath, next, "utf-8");
+    const tmp = `${cachedSkillPath}.tmp.${process.pid}.${Date.now()}`;
+    writeFileSync(tmp, next, "utf-8");
+    renameSync(tmp, cachedSkillPath);
   }
 
   return { cachedSkillPath, sourcePushPath };

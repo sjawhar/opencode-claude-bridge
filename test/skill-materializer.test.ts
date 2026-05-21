@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -186,6 +187,23 @@ describe("materializeSkill — security/containment", () => {
     await materializeSkill(makeSkill({ cacheRoot: tmp }), logger);
     expect(existsSync(path.join(tmp, ".opencode-claude-bridge-cache"))).toBe(
       true,
+    );
+  });
+
+  test("does not honor symlinks in the cache — unlinks before write", async () => {
+    const outside = path.join(tmp, "outside-target");
+    writeFileSync(outside, "should-not-be-overwritten\n");
+    const skill = makeSkill({ cacheRoot: tmp });
+    const targetDir = path.join(tmp, skill.sourceKey, skill.skillName);
+    mkdirSync(targetDir, { recursive: true });
+    const targetSkillMd = path.join(targetDir, "SKILL.md");
+    symlinkSync(outside, targetSkillMd);
+
+    await materializeSkill(skill, logger);
+
+    expect(readFileSync(outside, "utf-8")).toBe("should-not-be-overwritten\n");
+    expect(readFileSync(targetSkillMd, "utf-8")).toContain(
+      "name: public-thing",
     );
   });
 });
