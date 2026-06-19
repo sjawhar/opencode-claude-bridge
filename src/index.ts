@@ -4,7 +4,6 @@ import type { Plugin } from "@opencode-ai/plugin";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { getCacheRoot } from "./cache-paths";
 import { createLogger, type Logger } from "./logger";
-import type { TranslatedMcp } from "./mcp-translator";
 import { discoverClaudePlugins } from "./plugin-discovery";
 import { pruneStaleCache } from "./skill-materializer";
 import { type ClaudeBridgeSource, loadSource } from "./source-loader";
@@ -74,7 +73,6 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
       config: async (config: Record<string, unknown>) => {
         const agentMap = (config.agent ??= {}) as Record<string, unknown>;
         const commandMap = (config.command ??= {}) as Record<string, unknown>;
-        const mcpMap = (config.mcp ??= {}) as Record<string, unknown>;
         const skills = (config.skills ??= {}) as {
           paths?: string[];
           urls?: string[];
@@ -125,20 +123,6 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
               "command",
               source.namespace,
               "/",
-              logger,
-            );
-          }
-
-          for (const [mcpName, mcpCfg] of Object.entries(
-            loaded.skillMcps as Record<string, TranslatedMcp>,
-          )) {
-            await registerWithCollision(
-              mcpMap,
-              mcpName,
-              mcpCfg,
-              "mcp",
-              source.namespace,
-              "-",
               logger,
             );
           }
