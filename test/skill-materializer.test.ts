@@ -177,6 +177,38 @@ describe("materializeSkill", () => {
     );
     expect(result.sourcePushPath).toBe(path.join(tmp, "sjawhar"));
   });
+
+  test("round-trips a skill-embedded mcp: block and expands CLAUDE_PLUGIN_ROOT", async () => {
+    const result = expectMaterialized(
+      await materializeSkill(
+        makeSkill({
+          cacheRoot: tmp,
+          pluginRoot: "/abs/source",
+          extraFrontmatter: {
+            mcp: {
+              slack: {
+                command: "secrets",
+                args: ["X", "--", `${pluginRootToken}/bin/slack-mcp-server`],
+                env: { SLACK_MCP_ADD_MESSAGE_TOOL: "true" },
+              },
+            },
+          },
+        }),
+        logger,
+      ),
+    );
+    const content = readFileSync(result.cachedSkillPath, "utf-8");
+    const fm = content.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? "";
+    const parsed = parseYaml(fm) as Record<string, unknown>;
+    expect(parsed.mcp).toEqual({
+      slack: {
+        command: "secrets",
+        args: ["X", "--", "/abs/source/bin/slack-mcp-server"],
+        env: { SLACK_MCP_ADD_MESSAGE_TOOL: "true" },
+      },
+    });
+    expect(content).not.toContain(pluginRootToken);
+  });
 });
 
 describe("materializeSkill — security/containment", () => {

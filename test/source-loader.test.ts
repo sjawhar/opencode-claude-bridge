@@ -205,17 +205,6 @@ describe("loadSource", () => {
     expect(cmd.subtask).toBe(true);
   });
 
-  test("skill MCPs still come through into skillMcps", async () => {
-    const result = await loadSource(
-      { dir: sjawhar, namespace: "sjawhar" },
-      logger,
-      { cacheRoot },
-    );
-    expect(result.skillMcps.slack).toBeDefined();
-    expect(result.skillMcps.playwright).toBeDefined();
-    expect(result.skillMcps.upstream).toBeDefined();
-  });
-
   test("materializedSkillPaths lists every materialized SKILL.md absolute path", async () => {
     const result = await loadSource(
       { dir: sjawhar, namespace: "sjawhar" },
@@ -272,15 +261,6 @@ describe("loadSource", () => {
     // And the command-side registration for public-thing still happened (the
     // command-side path is independent of materialization).
     expect(result.commands["public-thing"]).toBeDefined();
-  });
-
-  test("aggregates MCPs from all skill SKILL.md files in the source dir", async () => {
-    const result = await loadSource({ dir: sjawhar }, logger, { cacheRoot });
-    expect(Object.keys(result.skillMcps)).toContain("slack");
-    expect(Object.keys(result.skillMcps)).toContain("playwright");
-    expect(Object.keys(result.skillMcps)).toContain("upstream");
-    expect(result.skillMcps.slack).toMatchObject({ type: "local" });
-    expect(result.skillMcps.upstream).toMatchObject({ type: "remote" });
   });
 
   test("omits skillMcps when skills: false", async () => {

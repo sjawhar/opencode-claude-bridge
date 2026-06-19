@@ -30,11 +30,11 @@ export interface SkillToMaterialize {
   /** Raw body with `${CLAUDE_PLUGIN_ROOT}` still present. Expansion runs here. */
   body: string;
   /**
-   * Any frontmatter fields beyond name/description to round-trip into the
-   * materialized SKILL.md. Bridge-handled fields like `disable-model-invocation`,
-   * `user-invocable`, and `mcp:` should be omitted by the caller — opencode
-   * ignores unknown fields, so passing them is harmless, but the caller has
-   * already acted on them, so stripping keeps the cache file clean.
+   * Any frontmatter fields beyond name/description, round-tripped verbatim into
+   * the materialized SKILL.md. The caller strips the fields the bridge consumes
+   * (`disable-model-invocation`, `user-invocable`, `agent`, `model`, `subtask`);
+   * everything else passes through. `${CLAUDE_PLUGIN_ROOT}` is expanded (in the
+   * frontmatter and the body) in buildContent.
    */
   extraFrontmatter: Record<string, unknown>;
 }
@@ -61,7 +61,7 @@ function buildContent(skill: SkillToMaterialize): string {
     fm[k] = v;
   }
   const expandedBody = expandPluginRoot(skill.body, skill.pluginRoot);
-  return `---\n${stringifyYaml(fm)}---\n\n${expandedBody.trimEnd()}\n`;
+  return `---\n${stringifyYaml(expandPluginRoot(fm, skill.pluginRoot))}---\n\n${expandedBody.trimEnd()}\n`;
 }
 
 export async function materializeSkill(

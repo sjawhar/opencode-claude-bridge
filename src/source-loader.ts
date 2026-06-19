@@ -58,7 +58,6 @@ function buildCommandTemplate(body: string): string {
 
 interface SkillsScanResult {
   commands: Record<string, unknown>;
-  skillMcps: Record<string, TranslatedMcp>;
   pushPaths: string[];
   materializedPaths: string[];
 }
@@ -72,14 +71,12 @@ async function scanSkills(
 ): Promise<SkillsScanResult> {
   const empty: SkillsScanResult = {
     commands: {},
-    skillMcps: {},
     pushPaths: [],
     materializedPaths: [],
   };
   if (!existsSync(dir)) return empty;
 
   const commands: Record<string, unknown> = {};
-  const skillMcps: Record<string, TranslatedMcp> = {};
   const materializedPaths: string[] = [];
   let pushPath: string | undefined;
 
@@ -101,16 +98,6 @@ async function scanSkills(
       continue;
     }
     if (!skill) continue;
-
-    // MCPs: aggregate, dedupe with a warning.
-    for (const [mcpName, mcpCfg] of Object.entries(skill.mcps)) {
-      if (skillMcps[mcpName]) {
-        await logger.warn(
-          `Duplicate MCP server name "${mcpName}" within source (from skill "${skill.name}")`,
-        );
-      }
-      skillMcps[mcpName] = mcpCfg;
-    }
 
     // Skill-side registration (model surface): materialize unless
     // disable-model-invocation: true.
@@ -165,7 +152,6 @@ async function scanSkills(
 
   return {
     commands,
-    skillMcps,
     pushPaths: pushPath ? [pushPath] : [],
     materializedPaths,
   };
@@ -224,7 +210,6 @@ export async function loadSource(
     normalizedSource.skills === undefined ? "skills" : normalizedSource.skills;
   let skillCachePushPaths: string[] = [];
   let materializedSkillPaths: string[] = [];
-  let skillMcps: Record<string, TranslatedMcp> = {};
   if (skillsSubdir !== false) {
     const dir = join(normalizedSource.dir, skillsSubdir);
     const sourceKey = computeSourceKey(
@@ -251,21 +236,14 @@ export async function loadSource(
       }
       commands[k] = v;
     }
-    skillMcps = result.skillMcps;
     skillCachePushPaths = result.pushPaths;
     materializedSkillPaths = result.materializedPaths;
   }
 
-  // Root-level .mcp.json (plugins that ship MCP servers at the root).
-  const rootMcps = await loadRootMcp(normalizedSource.dir, logger);
-  for (const [name, cfg] of Object.entries(rootMcps)) {
-    if (skillMcps[name]) {
-      await logger.warn(
-        `Duplicate MCP server name "${name}" in source ${normalizedSource.dir} (root .mcp.json vs skill-embedded)`,
-      );
-    }
-    skillMcps[name] = cfg;
-  }
+  // Root-level .mcp.json (plugins that ship MCP servers at the root). Skill-
+  // embedded `mcp:` blocks are intentionally NOT collected here: they ride the
+  // materialized SKILL.md frontmatter for the host to consume.
+  const skillMcps = await loadRootMcp(normalizedSource.dir, logger);
 
   return {
     agents: expandMap(agents, normalizedSource.dir),

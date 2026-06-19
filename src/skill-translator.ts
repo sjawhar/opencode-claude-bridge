@@ -3,7 +3,6 @@ import { basename, dirname } from "node:path";
 import { asScalarString } from "./coerce";
 import { parseFrontmatter } from "./frontmatter";
 import type { Logger } from "./logger";
-import { type TranslatedMcp, translateMcpBlock } from "./mcp-translator";
 import { mapClaudeModel } from "./model-mapper";
 
 interface SkillFrontmatter {
@@ -22,7 +21,6 @@ const BRIDGE_HANDLED_FIELDS = new Set([
   "description",
   "disable-model-invocation",
   "user-invocable",
-  "mcp",
   // Command-side fields the bridge consumes (do NOT round-trip them into the
   // materialized SKILL.md — opencode would ignore them anyway, and stripping
   // keeps the cache file clean):
@@ -44,8 +42,6 @@ export interface TranslatedSkill {
   userInvocable: boolean;
   /** Frontmatter passed through into the materialized SKILL.md, minus bridge-handled fields. */
   extraFrontmatter: Record<string, unknown>;
-  /** Extracted MCPs (passed to `config.mcp` by the loader). */
-  mcps: Record<string, TranslatedMcp>;
   /** Command-side fields the loader uses to build the slash-command config. */
   commandFields: {
     agent?: string;
@@ -91,8 +87,6 @@ export async function translateSkillFile(
   if (model) commandFields.model = model;
   if (typeof data.subtask === "boolean") commandFields.subtask = data.subtask;
 
-  const mcps = await translateMcpBlock(data.mcp, name, logger);
-
   const extraFrontmatter: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
     if (BRIDGE_HANDLED_FIELDS.has(k)) continue;
@@ -105,7 +99,6 @@ export async function translateSkillFile(
     disableModelInvocation,
     userInvocable,
     extraFrontmatter,
-    mcps,
     commandFields,
   };
   const description = asScalarString(data.description);
