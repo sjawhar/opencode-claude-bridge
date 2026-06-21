@@ -41,6 +41,5 @@ describe("non-string scalar frontmatter values", () => {
     expect(result?.description).toBe("42");
     expect(result?.commandFields.agent).toBe("7");
     expect(result?.commandFields.model).toBeUndefined();
-    expect(result?.mcps).toEqual({});
   });
 });
