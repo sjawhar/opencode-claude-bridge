@@ -289,6 +289,7 @@ describe("pruneStaleCache", () => {
     await pruneStaleCache(
       tmp,
       new Set([path.join(tmp, "sjawhar", "alive", "SKILL.md")]),
+      new Set(["sjawhar"]),
       logger,
     );
     expect(existsSync(path.join(tmp, "sjawhar", "alive"))).toBe(true);
@@ -298,20 +299,20 @@ describe("pruneStaleCache", () => {
   test("removes empty source-key dirs after their last skill is pruned", async () => {
     seed("dead-source", "only-skill");
     seedMarker();
-    await pruneStaleCache(tmp, new Set(), logger);
+    await pruneStaleCache(tmp, new Set(), new Set(["dead-source"]), logger);
     expect(existsSync(path.join(tmp, "dead-source"))).toBe(false);
   });
 
   test("leaves the cache root in place even when fully empty", async () => {
     seed("k", "s");
     seedMarker();
-    await pruneStaleCache(tmp, new Set(), logger);
+    await pruneStaleCache(tmp, new Set(), new Set(["k"]), logger);
     expect(existsSync(tmp)).toBe(true);
   });
 
   test("no-op when cache root does not exist", async () => {
     const missing = path.join(tmp, "does-not-exist");
-    await pruneStaleCache(missing, new Set(), logger);
+    await pruneStaleCache(missing, new Set(), new Set(), logger);
     expect(existsSync(missing)).toBe(false);
   });
 
@@ -324,6 +325,7 @@ describe("pruneStaleCache", () => {
     await pruneStaleCache(
       tmp,
       new Set([path.join(skillDir, "SKILL.md")]),
+      new Set(["sjawhar"]),
       logger,
     );
     // Skill dir still there
@@ -335,14 +337,33 @@ describe("pruneStaleCache", () => {
 
   test("refuses to prune when ownership marker is absent", async () => {
     seed("sjawhar", "stale");
-    await pruneStaleCache(tmp, new Set(), logger);
+    await pruneStaleCache(tmp, new Set(), new Set(["sjawhar"]), logger);
     expect(existsSync(path.join(tmp, "sjawhar", "stale"))).toBe(true);
   });
 
   test("prunes normally when ownership marker is present", async () => {
     seed("sjawhar", "stale");
     seedMarker();
-    await pruneStaleCache(tmp, new Set(), logger);
+    await pruneStaleCache(tmp, new Set(), new Set(["sjawhar"]), logger);
     expect(existsSync(path.join(tmp, "sjawhar", "stale"))).toBe(false);
+  });
+
+  test("does not prune source-keys this instance does not own (shared cache root)", async () => {
+    // Two bridge instances share one cache root: instance A owns "sjawhar",
+    // instance B owns "other". Instance A prunes with only its own live skill
+    // and owned source-key; instance B's skills must survive.
+    seed("sjawhar", "slack-bot");
+    seed("other", "log-day");
+    seedMarker();
+    await pruneStaleCache(
+      tmp,
+      new Set([path.join(tmp, "sjawhar", "slack-bot", "SKILL.md")]),
+      new Set(["sjawhar"]),
+      logger,
+    );
+    // Instance A keeps its own live skill.
+    expect(existsSync(path.join(tmp, "sjawhar", "slack-bot"))).toBe(true);
+    // Instance B's skill, under a source-key A does not own, is untouched.
+    expect(existsSync(path.join(tmp, "other", "log-day"))).toBe(true);
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { computeSourceKey } from "../src/cache-paths";
@@ -288,21 +294,42 @@ describe("dual registration (skill + command surfaces)", () => {
     }
   });
 
-  test("prunes stale cache entries on subsequent runs with reduced sources", async () => {
+  test("scopes cache pruning to owned source-keys (multi-instance safe)", async () => {
     const cacheRoot = mkdtempSync(path.join(os.tmpdir(), "ocb-int-"));
     try {
-      // First run: materializes everything.
+      // Pre-seed the shared cache with a stale skill under the "sjawhar" key
+      // this run WILL own, and a foreign instance's skill under a key it will
+      // NOT own.
+      mkdirSync(cacheRoot, { recursive: true });
+      writeFileSync(
+        path.join(cacheRoot, ".opencode-claude-bridge-cache"),
+        "marker\n",
+      );
+      const staleDir = path.join(cacheRoot, "sjawhar", "stale-skill");
+      mkdirSync(staleDir, { recursive: true });
+      writeFileSync(path.join(staleDir, "SKILL.md"), "stale\n");
+      const foreignSkill = path.join(
+        cacheRoot,
+        "other-instance",
+        "foreign",
+        "SKILL.md",
+      );
+      mkdirSync(path.dirname(foreignSkill), { recursive: true });
+      writeFileSync(foreignSkill, "foreign\n");
+
       await runBridge({
         sources: [{ dir: sjawhar, namespace: "sjawhar" }],
         cacheRoot,
       });
+
+      // Our source materialized.
       expect(
         existsSync(path.join(cacheRoot, "sjawhar", "public-thing", "SKILL.md")),
       ).toBe(true);
-
-      // Second run: empty sources → prune everything.
-      await runBridge({ sources: [], cacheRoot });
-      expect(existsSync(path.join(cacheRoot, "sjawhar"))).toBe(false);
+      // Stale skill under our owned key is pruned.
+      expect(existsSync(staleDir)).toBe(false);
+      // A foreign instance's cache, under a source-key we do not own, survives.
+      expect(existsSync(foreignSkill)).toBe(true);
     } finally {
       rmSync(cacheRoot, { recursive: true, force: true });
     }

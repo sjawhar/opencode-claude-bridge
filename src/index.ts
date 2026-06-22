@@ -99,6 +99,7 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
         }
 
         const liveSkillPaths = new Set<string>();
+        const ownedSourceKeys = new Set<string>();
 
         for (const source of allSources) {
           const loaded = await loadSource(source, logger, { cacheRoot });
@@ -134,9 +135,18 @@ export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
           for (const sp of loaded.materializedSkillPaths) {
             liveSkillPaths.add(sp);
           }
+
+          if (loaded.skillSourceKey) {
+            ownedSourceKeys.add(loaded.skillSourceKey);
+          }
         }
 
-        await pruneStaleCache(cacheRoot, liveSkillPaths, logger);
+        await pruneStaleCache(
+          cacheRoot,
+          liveSkillPaths,
+          ownedSourceKeys,
+          logger,
+        );
       },
     };
   };
