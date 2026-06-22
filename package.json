@@ -1,6 +1,6 @@
 {
   "name": "@sjawhar/opencode-claude-bridge",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Bridge Claude Code agents and commands into OpenCode via the plugin config hook",
   "type": "module",
   "main": "dist/index.js",
