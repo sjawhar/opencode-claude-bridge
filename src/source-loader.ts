@@ -31,6 +31,13 @@ export interface LoadedSource {
   skillCachePushPaths: string[];
   /** Absolute paths of materialized SKILL.md files. Used for stale-cache pruning. */
   materializedSkillPaths: string[];
+  /**
+   * The cache source-key this source owns (`computeSourceKey`), present only
+   * when skills are enabled for the source. Lets the caller scope cache pruning
+   * to the source-keys this bridge instance manages, so multiple bridge
+   * instances sharing one cache root do not prune each other's skills.
+   */
+  skillSourceKey?: string;
   skillMcps: Record<string, TranslatedMcp>;
 }
 
@@ -210,12 +217,14 @@ export async function loadSource(
     normalizedSource.skills === undefined ? "skills" : normalizedSource.skills;
   let skillCachePushPaths: string[] = [];
   let materializedSkillPaths: string[] = [];
+  let skillSourceKey: string | undefined;
   if (skillsSubdir !== false) {
     const dir = join(normalizedSource.dir, skillsSubdir);
     const sourceKey = computeSourceKey(
       normalizedSource.dir,
       normalizedSource.namespace,
     );
+    skillSourceKey = sourceKey;
     const cacheRoot = opts.cacheRoot ?? getCacheRoot();
     const result = await scanSkills(
       dir,
@@ -250,6 +259,7 @@ export async function loadSource(
     commands: expandMap(commands, normalizedSource.dir),
     skillCachePushPaths,
     materializedSkillPaths,
+    skillSourceKey,
     skillMcps: expandMap(skillMcps, normalizedSource.dir),
   };
 }

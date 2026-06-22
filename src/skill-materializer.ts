@@ -131,6 +131,7 @@ export async function materializeSkill(
 export async function pruneStaleCache(
   cacheRoot: string,
   liveSkillPaths: Set<string>,
+  ownedSourceKeys: Set<string>,
   logger: Logger,
 ): Promise<void> {
   if (!existsSync(cacheRoot)) return;
@@ -156,6 +157,10 @@ export async function pruneStaleCache(
   }
 
   for (const sourceKey of sourceKeys) {
+    // Only prune within source-keys this bridge instance owns. Multiple bridge
+    // instances can share one cache root (e.g. a global and a project bridge);
+    // pruning a source-key we do not own would delete another instance's skills.
+    if (!ownedSourceKeys.has(sourceKey)) continue;
     const sourceDir = path.join(cacheRoot, sourceKey);
     let skillNames: string[];
     try {
