@@ -65,7 +65,46 @@ async function registerWithCollision<T>(
   );
 }
 
-export function createClaudeBridge(bridgeConfig: ClaudeBridgeConfig): Plugin {
+const DEFAULT_SOURCES: ClaudeBridgeSource[] = [{ dir: ".claude" }];
+
+type PluginInput = Parameters<Plugin>[0];
+
+function isPluginInput(
+  arg: ClaudeBridgeConfig | PluginInput | undefined,
+): arg is PluginInput {
+  // opencode invokes a config-array plugin export as `export(pluginInput)`,
+  // where pluginInput carries `client`. A ClaudeBridgeConfig never does.
+  return (
+    typeof arg === "object" &&
+    arg !== null &&
+    "client" in arg &&
+    !("sources" in arg)
+  );
+}
+
+/**
+ * Dual-mode entry point.
+ *
+ * - Called with a {@link ClaudeBridgeConfig} (or nothing) it returns a
+ *   {@link Plugin} — the factory form used from a hand-written plugin file or
+ *   the global opencode config.
+ * - Called by opencode directly with a plugin input (when listed by package
+ *   name in the opencode `plugin` array) it runs as a zero-config plugin over
+ *   `.claude`, returning the hooks object.
+ *
+ * A single export keeps opencode from invoking two plugin exports and
+ * double-registering agents/commands/skills.
+ */
+export function createClaudeBridge(
+  bridgeConfig?: ClaudeBridgeConfig | PluginInput,
+): Plugin | ReturnType<Plugin> {
+  if (isPluginInput(bridgeConfig)) {
+    return buildPlugin({ sources: DEFAULT_SOURCES })(bridgeConfig);
+  }
+  return buildPlugin(bridgeConfig ?? { sources: DEFAULT_SOURCES });
+}
+
+function buildPlugin(bridgeConfig: ClaudeBridgeConfig): Plugin {
   return async ({ client }) => {
     const logger = createLogger(client as OpencodeClient);
     const cacheRoot = bridgeConfig.cacheRoot ?? getCacheRoot();
